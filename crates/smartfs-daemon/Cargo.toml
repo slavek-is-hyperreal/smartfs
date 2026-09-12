@@ -1,6 +1,6 @@
 [package]
 name = "smartfs-daemon"
-version.workspace = true
+version = "0.1.3"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -16,6 +16,7 @@ smartfs-store = { workspace = true }
 smartfs-fuse = { workspace = true }
 smartfs-semantic = { workspace = true }
 clap = { workspace = true }
+fuser = { version = "0.15", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 anyhow = "1"
 tracing = { workspace = true }
