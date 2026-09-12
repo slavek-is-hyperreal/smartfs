@@ -51,6 +51,7 @@ Dwa dokumenty operacyjne, dodane po pierwszym review specyfikacji:
 | Nowe migracje | `005_semantic_consolidation.sql`, `006_fulltext_search.sql` | [migrations/](migrations/) |
 | Nowe narzędzia MCP | `search_by_concept(query, plugin_type, limit)` — graf centroidów; `search_fulltext(query, plugin_type?, limit)` — BM25 | [docs/crates/smartfs-mcp.md](docs/crates/smartfs-mcp.md) |
 | Plan wykonania agentowego | Fazy budowy wg grafu zależności crate'ów zamiast podziału na weekendy; zasady dla subagentów; gotowy prompt pod Antigravity 2.0 / Gemini 3.8 Flash | [docs/06-agentic-execution-plan.md](docs/06-agentic-execution-plan.md) |
+| Ciągłość agenta (post-MVP, poza Fazami 0-6) | `special_data.agent` (`actor_id`/`task_id`) na `file_versions` + MCP `get_actor_activity` — agent, który stracił kontekst, sam odpytuje "co już zrobiłem", zamiast wymagać relacji od człowieka | [ADR-56](docs/adr/ADR-56-agent-continuity.md) |
 
 Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedziczone wprost z v4.5+v5.0 bez zmian — patrz [`docs/base-v4.5-v5.0/`](docs/base-v4.5-v5.0/) i [`docs/crates/_unchanged.md`](docs/crates/_unchanged.md).
 

@@ -55,6 +55,8 @@ Kluczowa własność architektoniczna: **`smartfs-semantic` nigdy nie jest na kr
 
 Pełne ADR: [docs/adr/ADR-49-qwen-default-model.md](adr/ADR-49-qwen-default-model.md), [docs/adr/ADR-50-working-memory-consolidation.md](adr/ADR-50-working-memory-consolidation.md), [docs/adr/ADR-53-consolidation-concurrency.md](adr/ADR-53-consolidation-concurrency.md), [docs/adr/ADR-54-fulltext-search-backend.md](adr/ADR-54-fulltext-search-backend.md), [docs/adr/ADR-55-gpu-acceleration.md](adr/ADR-55-gpu-acceleration.md).
 
+**Post-MVP, poza zakresem Faz 0-6 (nie wymaga nowej migracji, nie zmienia promptu dla Antigravity):** [ADR-56](adr/ADR-56-agent-continuity.md) — prowieniencja `actor`/`session`/`task_id` w `file_versions.special_data` i narzędzie MCP `get_actor_activity`, żeby agent, który stracił kontekst (wygasła sesja, ucięta rozmowa), mógł sam odpytać "co ja już zrobiłem", zamiast wymagać ręcznej relacji od człowieka. Traktowane analogicznie do GPU (ADR-55/Faza 7) — bonus ciągłości, nigdy warunek pierwszego działającego demona.
+
 ## Invarianty — rozszerzenie ROOT CLAUDE.md
 
 Pięć invariantów z v4.5 (ROOT CLAUDE.md §3.1, pełny tekst także w
