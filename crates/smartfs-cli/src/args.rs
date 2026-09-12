@@ -26,6 +26,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
+/// @id: a362ce60-77c7-4f18-9cd3-c55ba2c2de6c
 impl Cli {
     /// @id: e6a1b2c3-1001-4000-8000-000000000002
     /// Resolves the database connection URL from argument, environment variable, or default.

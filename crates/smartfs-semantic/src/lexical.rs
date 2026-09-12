@@ -29,6 +29,7 @@ pub enum LexicalRelation {
     Meronym,
 }
 
+/// @id: 5b87d987-43ad-4a83-8afb-f4b788fca104
 impl std::str::FromStr for LexicalRelation {
     type Err = SmartFsError;
 
@@ -45,6 +46,7 @@ impl std::str::FromStr for LexicalRelation {
     }
 }
 
+/// @id: 8e14b7f2-61e5-4041-9b1d-14c6b15bccd0
 impl LexicalRelation {
     /// @id: d0124a91-3b4e-4f12-8901-23456789abcd
     /// Returns the static lowercase string representation of this relation.

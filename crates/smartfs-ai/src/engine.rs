@@ -20,6 +20,7 @@ pub struct CpuEmbeddingEngine {
     default_dimensions: usize,
 }
 
+/// @id: a4f87759-d659-412f-bc7b-3cf961cc2fb8
 impl CpuEmbeddingEngine {
     /// @id: 23cdef01-6789-4abc-2d34-56789abcdef0
     /// Create a new CPU embedding engine with default dimensionality (1024 for Qwen3-Embedding-0.6B).
@@ -29,11 +30,13 @@ impl CpuEmbeddingEngine {
         })
     }
 
+    /// @id: 4427eac0-1259-4a70-87b1-beaa1ac4002e
     /// Default configuration for Qwen3-Embedding-0.6B (1024 dimensions).
     pub fn default_qwen() -> Arc<Self> {
         Self::new(1024)
     }
 
+    /// @id: b5e4e5f6-70f5-4fd8-b392-8fb5ce4f75c3
     /// Synchronous vector generation with L2 normalization.
     pub fn compute_vector(text: &str, dimensions: usize) -> Vec<f32> {
         if dimensions == 0 {
@@ -73,6 +76,7 @@ impl CpuEmbeddingEngine {
     }
 }
 
+/// @id: 3a9eb1ee-7f4a-4dc4-84d4-09fc85997602
 impl Default for CpuEmbeddingEngine {
     fn default() -> Self {
         Self {
@@ -81,6 +85,7 @@ impl Default for CpuEmbeddingEngine {
     }
 }
 
+/// @id: 1c75fb31-9b71-476f-bbb8-88cb4052151a
 #[async_trait]
 impl EmbeddingEngine for CpuEmbeddingEngine {
     async fn embed(&self, text: &str, dimensions: usize) -> Result<Vec<f32>> {

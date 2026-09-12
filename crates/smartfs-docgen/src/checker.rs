@@ -107,7 +107,7 @@ pub fn check_registry_consistency(
         let entry = entry.map_err(|e| Error::IoGeneric(e.into()))?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+        if is_code_rs_file(path) {
             let content = fs::read_to_string(path).map_err(|e| Error::Io {
                 path: path.to_path_buf(),
                 source: e,
@@ -257,4 +257,17 @@ fn find_and_load_registry(docs_root: &Path, crates_root: &Path) -> Option<Symbol
     }
 
     None
+}
+
+fn is_code_rs_file(path: &Path) -> bool {
+    if !path.is_file() || !path.extension().is_some_and(|ext| ext == "rs") {
+        return false;
+    }
+    for comp in path.components() {
+        let name = comp.as_os_str().to_string_lossy();
+        if name == "target" || name == "tests" || name == "benches" {
+            return false;
+        }
+    }
+    true
 }

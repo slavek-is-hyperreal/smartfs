@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+/// @id: 4562c4fb-5f2d-423d-86f4-add5090ae4ca
 /// IPFS storage backend implementing `BlobStore` via the Kubo daemon HTTP API.
 #[derive(Debug, Clone)]
 pub struct IpfsStore {
@@ -13,7 +14,9 @@ pub struct IpfsStore {
     client: reqwest::Client,
 }
 
+/// @id: c212eaa5-6808-4055-9f3b-ecf49eb0a341
 impl IpfsStore {
+    /// @id: 88ebea89-da84-4dde-923e-38d0fddedb46
     /// Creates a new `IpfsStore` with configured API and Gateway endpoints.
     pub fn new(api_endpoint: impl Into<String>, gateway_endpoint: impl Into<String>) -> Self {
         Self {
@@ -23,12 +26,14 @@ impl IpfsStore {
         }
     }
 
+    /// @id: a260392b-9918-42b9-a283-47c17e5e62cc
     /// Default Kubo endpoints (http://127.0.0.1:5001 for API, http://127.0.0.1:8080 for Gateway).
     pub fn default_local() -> Self {
         Self::new("http://127.0.0.1:5001", "http://127.0.0.1:8080")
     }
 }
 
+/// @id: 9a4bef1e-0561-45d5-afbe-173332f4f408
 #[async_trait]
 impl BlobStore for IpfsStore {
     async fn put(&self, uuid: Uuid, data: &[u8]) -> Result<()> {

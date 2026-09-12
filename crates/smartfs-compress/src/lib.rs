@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 /// Default chunk size for streaming I/O pipeline (4 MB).
 pub const CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
+/// @id: 4f398a07-7ac9-476b-a103-1bffae5c2915
 /// Computes SHA-256 hex string from raw, uncompressed bytes.
 pub fn hash_bytes(data: &[u8]) -> ContentHash {
     let mut hasher = Sha256::new();
@@ -19,18 +20,21 @@ pub fn hash_bytes(data: &[u8]) -> ContentHash {
     ContentHash(hex::encode(hasher.finalize()))
 }
 
+/// @id: 857d5a34-f18d-40d3-ba04-8a6fed34bbcd
 /// Compresses a slice of bytes using zstd at the specified compression level.
 pub fn compress(data: &[u8], level: i32) -> Result<Vec<u8>> {
     zstd::encode_all(data, level)
         .map_err(|e| SmartFsError::Compression(format!("zstd compress error: {e}")))
 }
 
+/// @id: ae494a15-a6e8-4f91-84a9-ab0a803837d0
 /// Decompresses zstd-compressed bytes back to original content.
 pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
     zstd::decode_all(compressed)
         .map_err(|e| SmartFsError::Compression(format!("zstd decompress error: {e}")))
 }
 
+/// @id: 3ce287aa-e9ba-441e-9e22-0ab750dbcc4e
 /// Streams raw bytes from `source`, incrementally computing SHA-256 and zstd-compressing.
 ///
 /// Execution order (Root Invariant #1):

@@ -28,6 +28,7 @@ pub struct ToolHandler {
     plugins_dir: Option<PathBuf>,
 }
 
+/// @id: f57b71d8-5653-4346-bbc1-e9cb7e6d98da
 impl ToolHandler {
     /// @id: 51036957-cdeb-4de3-b5e5-08f728482e69
     /// Creates a new `ToolHandler` with database pool, blob store, and optional plugins directory.
@@ -56,11 +57,13 @@ impl ToolHandler {
         }
     }
 
+    /// @id: 793a37cf-199b-48fe-b3fd-0da23c5536ec
     /// Access the underlying database connection pool.
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
+    /// @id: 11d7d0c2-7707-4f46-9035-afe310eccf36
     /// Access the underlying blob store.
     pub fn store(&self) -> &dyn BlobStore {
         &*self.store

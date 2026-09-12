@@ -109,12 +109,14 @@ pub struct FuseStateManager {
     ino_to_id: RwLock<HashMap<u64, Uuid>>,
 }
 
+/// @id: b8a75f66-9325-4f8f-8281-bb89cdf58980
 impl Default for FuseStateManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// @id: 1eebeab2-9def-4f09-ba84-88ced7726b3e
 impl FuseStateManager {
     /// @id: 07b8c9d0-e1f2-4a3b-4c5d-6e7f8091a2b3
     /// Creates a new, empty `FuseStateManager`.

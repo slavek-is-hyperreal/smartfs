@@ -14,6 +14,7 @@ pub enum SchemaFamily {
     General1024Qwen,
 }
 
+/// @id: 30a3ec58-724c-4b58-84b3-4a3c495e215f
 impl SchemaFamily {
     /// @id: 8b2c3d4e-5f60-4123-9abc-def012345678
     /// Resolves the schema family for a given model ID using the database.

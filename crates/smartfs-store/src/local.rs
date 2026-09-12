@@ -6,6 +6,7 @@ use tokio::io::{AsyncRead, AsyncWriteExt};
 
 use crate::traits::BlobStore;
 
+/// @id: a84e7122-77d7-4c3e-a371-f9a7a5189fd0
 /// Local filesystem implementation of `BlobStore`.
 /// Stores blobs in a flat directory at `{root}/{uuid}`.
 /// Writes atomically via temporary write-then-rename on the same filesystem.
@@ -14,7 +15,9 @@ pub struct LocalDiskStore {
     root: PathBuf,
 }
 
+/// @id: 574cc563-a249-4126-b8ba-d6191169a362
 impl LocalDiskStore {
+    /// @id: 44cef0a8-e672-44dd-9341-050e644dc33e
     /// Creates a new `LocalDiskStore` targeting the given root directory.
     pub fn new(root: impl AsRef<Path>) -> Self {
         Self {
@@ -22,6 +25,7 @@ impl LocalDiskStore {
         }
     }
 
+    /// @id: 0fe94787-171a-4308-bbab-b35e4be40392
     /// Returns the target filesystem path for a blob UUID.
     pub fn blob_path(&self, uuid: Uuid) -> PathBuf {
         self.root.join(uuid.to_string())
@@ -33,6 +37,7 @@ impl LocalDiskStore {
     }
 }
 
+/// @id: 80d7af75-21b7-4135-9c16-6a0374c4764c
 #[async_trait]
 impl BlobStore for LocalDiskStore {
     async fn put(&self, uuid: Uuid, data: &[u8]) -> Result<()> {

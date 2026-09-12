@@ -12,7 +12,9 @@ pub enum DestructiveAction {
     OverwriteFile { path: String, content: String },
 }
 
+/// @id: 5ea60772-bd87-4c28-9314-5abe4f4fb46f
 impl DestructiveAction {
+    /// @id: f687a482-ee20-48d9-9cdb-3b93ce4f0c54
     /// Action name identifier.
     pub fn action_name(&self) -> &'static str {
         match self {
@@ -21,6 +23,7 @@ impl DestructiveAction {
         }
     }
 
+    /// @id: 7589c6d3-ce29-4151-9756-336103a9f048
     /// Target path of the destructive action.
     pub fn path(&self) -> &str {
         match self {
@@ -47,6 +50,7 @@ pub struct TokenManager {
     ttl: Duration,
 }
 
+/// @id: ca4f9cf4-6784-43fe-ac9b-a9d9d41b7ad9
 impl TokenManager {
     /// @id: e78d7cfd-f109-4c7d-868e-f9669056a93f
     /// Creates a new `TokenManager` with the specified token time-to-live.
@@ -57,6 +61,7 @@ impl TokenManager {
         }
     }
 
+    /// @id: cbff604d-5295-4c39-bcee-211036d7f9c3
     /// Default manager with 5-minute TTL.
     pub fn with_default_ttl() -> Self {
         Self::new(Duration::from_secs(300))

@@ -24,7 +24,7 @@ pub fn backfill_missing_ids(crates_path: &Path) -> Result<usize> {
         let entry = entry.map_err(|e| Error::IoGeneric(e.into()))?;
         let path = entry.path();
 
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+        if is_code_rs_file(path) {
             let content = fs::read_to_string(path).map_err(|e| Error::Io {
                 path: path.to_path_buf(),
                 source: e,
@@ -71,4 +71,17 @@ pub fn backfill_missing_ids(crates_path: &Path) -> Result<usize> {
     }
 
     Ok(total_inserted)
+}
+
+fn is_code_rs_file(path: &Path) -> bool {
+    if !path.is_file() || !path.extension().is_some_and(|ext| ext == "rs") {
+        return false;
+    }
+    for comp in path.components() {
+        let name = comp.as_os_str().to_string_lossy();
+        if name == "target" || name == "tests" || name == "benches" {
+            return false;
+        }
+    }
+    true
 }

@@ -103,6 +103,7 @@ pub enum FulltextHitKind {
     AstNode,
 }
 
+/// @id: ce9d4bcb-cb19-402a-b35a-566d36b4cf23
 impl std::fmt::Display for FulltextHitKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

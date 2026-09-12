@@ -15,6 +15,7 @@ pub struct McpServer {
     handler: Arc<ToolHandler>,
 }
 
+/// @id: 83be4353-d6c9-4274-b134-c7e0f2100985
 impl McpServer {
     /// @id: 0f967d95-af26-48c1-a568-8fcf812ce8fd
     /// Creates a new `McpServer` wrapping a `ToolHandler`.
@@ -24,6 +25,7 @@ impl McpServer {
         }
     }
 
+    /// @id: 67e6dcee-389c-4143-8b45-5ca9d177ae93
     /// Access the underlying `ToolHandler`.
     pub fn handler(&self) -> &ToolHandler {
         &self.handler

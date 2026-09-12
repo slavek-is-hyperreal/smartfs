@@ -11,6 +11,7 @@ pub struct ActivityMonitor {
     write_tx: broadcast::Sender<()>,
 }
 
+/// @id: b1fa48d4-7ed3-463b-87f7-0488a05c1dea
 impl ActivityMonitor {
     /// @id: 9a345678-def0-5123-9456-789abcdef012
     /// Create a new activity monitor.
@@ -73,6 +74,7 @@ impl ActivityMonitor {
     }
 }
 
+/// @id: b5c89047-882d-4890-a92d-e8e5d340715c
 impl Default for ActivityMonitor {
     fn default() -> Self {
         let (write_tx, _) = broadcast::channel(64);

@@ -44,6 +44,7 @@ pub struct SmartFsFuse {
     force: bool,
 }
 
+/// @id: 85d0907f-cba5-4631-8aa8-53f612c0192f
 impl SmartFsFuse {
     /// @id: 6714c5d6-e7f8-409a-a1b2-c3d4e5f60718
     /// Creates a new `SmartFsFuse` filesystem instance.
@@ -94,6 +95,7 @@ impl SmartFsFuse {
     }
 }
 
+/// @id: 107de35e-41a2-4ce0-baab-b6a616fc4797
 impl Filesystem for SmartFsFuse {
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = match name.to_str() {

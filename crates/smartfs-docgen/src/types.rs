@@ -59,6 +59,7 @@ pub struct SymbolRegistry {
     pub symbols: Vec<SymbolRecord>,
 }
 
+/// @id: 687d4695-14e7-41f9-ae2d-4087cd193d44
 impl SymbolRegistry {
     /// @id: deccec49-9c9d-46a5-9323-5623d21b3f8d
     /// Looks up a symbol record by its persistent UUID.

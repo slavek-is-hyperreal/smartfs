@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use smartfs_schema::{Result, Uuid};
 use tokio::io::AsyncRead;
 
+/// @id: 849254d6-fcce-4156-a6fd-45ce62d4f19c
 /// Universal abstraction for physical blob storage backends.
 /// Receives already-compressed bytes. Zero awareness of SQL, inodes, or compression.
 #[async_trait]

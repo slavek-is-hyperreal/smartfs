@@ -1,6 +1,7 @@
 use thiserror::Error;
 use uuid::Uuid;
 
+/// @id: f2ec5294-d37c-4ec2-be47-29bd84591ce4
 /// Global unified error type across all SmartFS crates.
 /// All crates must use this error enum to preserve error transparency and interoperability.
 #[derive(Error, Debug)]

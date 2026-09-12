@@ -42,6 +42,7 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
+/// @id: 1152d2f1-3fbd-4dc9-acc7-9fca0fb36f86
 impl JsonRpcError {
     /// @id: b53f9d43-07f3-4e91-85dc-0d5fcf0d60b9
     pub fn parse_error(detail: impl Into<String>) -> Self {
@@ -89,6 +90,7 @@ impl JsonRpcError {
     }
 }
 
+/// @id: 1a5e0f25-108f-4b85-9146-405e80f7fdf7
 impl From<SmartFsError> for JsonRpcError {
     fn from(err: SmartFsError) -> Self {
         match err {
@@ -139,6 +141,7 @@ pub struct JsonRpcResponse {
     pub error: Option<JsonRpcError>,
 }
 
+/// @id: 577b1ddf-d013-48ee-bced-a5019072acf4
 impl JsonRpcResponse {
     /// @id: 3bfff210-a801-4f88-bfb4-a8d5f67b65fe
     pub fn success(id: Option<serde_json::Value>, result: serde_json::Value) -> Self {

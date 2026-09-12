@@ -32,6 +32,7 @@ fn encode_base32_multibase(input: &[u8]) -> String {
     result
 }
 
+/// @id: 0469de24-7e6d-45f0-acbe-d3b32c8987f3
 /// Computes an IPFS CIDv1 string from a 32-byte SHA-256 digest if file size < 256 KB.
 /// Returns `None` if size >= 256 KB (per ADR-17).
 pub fn compute_cid_from_digest(digest: &[u8; 32], size: u64) -> Option<String> {
@@ -51,6 +52,7 @@ pub fn compute_cid_from_digest(digest: &[u8; 32], size: u64) -> Option<String> {
     Some(encode_base32_multibase(&raw_cid))
 }
 
+/// @id: 5c6f1df8-e5a6-4bf8-929b-41e6e2130c42
 /// Computes an IPFS CIDv1 string from `ContentHash` (hex-encoded SHA-256) and file size.
 pub fn compute_cid(content_hash: &ContentHash, size: u64) -> Result<Option<String>> {
     if size >= MAX_INLINE_CID_SIZE {
