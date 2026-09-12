@@ -11,7 +11,7 @@ Dokumentacja, która linkuje "funkcja X jest w pliku Y, linia Z", psuje się prz
 Bezpośrednio nad każdym publicznym elementem (`pub fn`, `pub struct`, `pub enum`, `pub trait`, blok `impl`), który ma być adresowalny z dokumentacji, umieszczamy znacznik:
 
 ```rust
-/// @id: 6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c44
+/// @id: 6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c45
 /// Pętla nadzorcy konsolidacji — patrz docs/03-consolidation-design.md §2.
 pub async fn consolidation_supervisor(db: Pool, cfg: ConsolidationConfig) {
     // ...
@@ -42,6 +42,7 @@ pub struct SymbolRecord {
     pub last_known_line: u32,
     pub doc_summary: Option<String>,
     pub tombstoned: bool,
+    pub tombstoned_reason: Option<String>,
 }
 
 /// @id: b7e1c3a9-5f28-4d64-9a1e-8c0b6d2f4a91
@@ -101,7 +102,7 @@ pub fn check_registry_consistency(crates_root: &Path, docs_root: &Path) -> Resul
 W plikach `.md` pod `docs/` symbol jest linkowany tak:
 
 ```markdown
-Zobacz implementację [`consolidation_supervisor`](symbol://6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c44)
+Zobacz implementację [`consolidation_supervisor`](symbol://6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c45)
 ```
 
 `symbol://<uuid>` nie jest realnym URI rozwiązywanym przez przeglądarkę — jest rozwiązywany przez `smartfs-docgen resolve` (CLI) albo przez wtyczkę edytora, która na żądanie zamienia go na aktualne `crates/smartfs-semantic/src/consolidate.rs:47` i tam przeskakuje. Dokumentacja w repo commituje `symbol://`, nigdy zamrożonego `plik:linia` — to jest cała różnica, która sprawia, że link przeżywa refaktoryzację.

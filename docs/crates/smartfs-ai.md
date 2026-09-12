@@ -18,7 +18,7 @@ image_model = "qwen3-vl-embedding-2b"       # NOWE — obrazy, opt-in
 - embeddings_384/768 z modeli starszych — tylko dla wierszy, które je już
   mają (kompatybilność wstecz); nowe pliki NIE dostają już embeddings_384
   domyślnie, chyba że jawnie skonfigurowano legacy_model w smartfs.toml
-- embeddings_1024_qwen_vl z Qwen3-VL-Embedding-2B — tylko dla plików, których
+- embeddings_1024_qwen_vl z Qwen3-VL-Embedding-2B **(post-MVP — tabela nie istnieje w migracjach 001-006)** — tylko dla plików, których
   plugin ma "embedding".model wskazujący na model obrazowy (nowość — png.json
   i podobne przestają mieć "embedding": null)
 ```

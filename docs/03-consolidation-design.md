@@ -45,7 +45,7 @@ pub async fn spawn_all_consolidation_supervisors(db: Pool) -> Result<()> {
 }
 ```
 
-**Współbieżność między wieloma instancjami demona (jeśli kiedyś uruchamiane tak, dziś poza zakresem MVP, ale zabezpieczone już teraz):** każdy `consolidation_supervisor` bierze `pg_try_advisory_lock(hashtext(plugin_type || model_id))` na czas jednego batcha. To jest jedyne miejsce w v6.0, gdzie sięgamy po advisory lock — i celowo, bo tu (w przeciwieństwie do dedupu blobów, ADR-40) nie ma okna I/O między zwolnieniem locka a zapisem: cała operacja mieści się w jednej krótkiej transakcji SQL, więc żaden z problemów, które zdyskwalifikowały advisory lock w ADR-40, tu nie występuje. To zamyka lukę "dwie współbieżne instancje tworzą prawie identyczne centroidy dla tego samego wektora" u źródła, zamiast tylko sprzątać po fakcie.
+**Współbieżność między wieloma instancjami demona (jeśli kiedyś uruchamiane tak, dziś poza zakresem MVP, ale zabezpieczone już teraz):** `pg_try_advisory_xact_lock` jest teraz **pierwszą instrukcją wewnątrz** transakcji `consolidate_batch` i `merge_centroids`, nie w pętli supervisora. Supervisor po prostu wywołuje `consolidate_batch(...)` — jeśli inna instancja trzyma lock, `consolidate_batch` zwraca `Ok(0)` z debug logiem, a supervisor zapętla się normalnie. Blokada transakcyjna (`xact`) zwalnia się automatycznie przy `COMMIT` lub `ROLLBACK` — brak ręcznego `release_advisory_lock`. To zamyka lukę „dwie współbieżne instancje tworzą prawie identyczne centroidy dla tego samego wektora" u źródła, zamiast tylko sprzątać po fakcie.
 
 ```rust
 /// @id: 6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c44
@@ -60,19 +60,14 @@ pub async fn consolidation_supervisor(db: Pool, combo: (String, Uuid)) {
         let backlog = count_unconsolidated(&db, &plugin_type, model_id).await.unwrap_or(0);
 
         let should_run = backlog >= cfg.backlog_threshold
-            || activity_monitor.idle_for(cfg.idle_before_sleep).await
+            || last_activity.elapsed() >= cfg.idle_before_sleep
             || last_run.elapsed() >= cfg.max_wait;
 
         if should_run {
-            let lock_key = advisory_lock_key(&plugin_type, model_id);
-            if try_advisory_lock(&db, lock_key).await.unwrap_or(false) {
-                match consolidate_batch(&db, &plugin_type, model_id, &cfg).await {
-                    Ok(n) => { tracing::info!("consolidated {n} vectors for {plugin_type}/{model_id}"); last_run = Instant::now(); }
-                    Err(e) => tracing::error!("consolidation batch failed: {e}"),
-                }
-                release_advisory_lock(&db, lock_key).await.ok();
+            match consolidate_batch(&db, &plugin_type, model_id, &cfg).await {
+                Ok(n) => { tracing::info!("consolidated {n} vectors for {plugin_type}/{model_id}"); last_run = Instant::now(); }
+                Err(e) => tracing::error!("consolidation batch failed: {e}"),
             }
-            // lock niedostępny = inna instancja już pracuje nad tą kombinacją; nic nie rób, spróbuj następnym razem
         } else {
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
@@ -126,8 +121,8 @@ async fn claim_unconsolidated_batch(
         WHERE consolidated = FALSE AND is_current = TRUE
           AND plugin_type = $1 AND model_id = $2
         ORDER BY created_at ASC
-        FOR UPDATE SKIP LOCKED
         LIMIT $3
+        FOR UPDATE SKIP LOCKED
         "#,
         plugin_type, model_id, limit
     ).fetch_all(&mut **tx).await.map_err(SmartFsError::from)
@@ -149,6 +144,17 @@ pub async fn consolidate_batch(
     cfg: &ConsolidationConfig,
 ) -> Result<usize> {
     let mut tx = db.begin().await?;
+    // First statement in transaction: acquire transaction-scoped advisory lock (ADR-53).
+    // pg_try_advisory_xact_lock is auto-released on COMMIT or ROLLBACK — no manual release.
+    let lock_key = advisory_lock_key(plugin_type, model_id);
+    let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(lock_key)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !locked {
+        tracing::debug!("advisory lock contention for {plugin_type}/{model_id}, skipping cycle");
+        return Ok(0);
+    }
     let batch = claim_unconsolidated_batch(&mut tx, plugin_type, model_id, cfg.batch_size).await?;
     let mut n = 0;
 
@@ -256,7 +262,7 @@ async fn split_centroid(tx: &mut Transaction<'_, Postgres>, centroid_id: Uuid, c
 
 ## 4b. Merge centroidów — NOWA sekcja (zamyka lukę "brak operacji odwrotnej do split")
 
-Advisory lock z §2 zamyka najczęstszą przyczynę powstawania prawie identycznych centroidów (dwie współbieżne konsolidacje tej samej kombinacji). Nie zamyka drugiej: powolny dryf, w którym dwa centroidy powstałe w różnym czasie stają się z czasem bliskie sobie (np. baza kodu ujednolica styl, dwie wcześniej odrębne konwencje nazewnictwa zlewają się semantycznie). Dlatego `consolidation_supervisor` uruchamia dodatkowo, dużo rzadziej (co `MERGE_CHECK_INTERVAL`, domyślnie raz na 20 cykli konsolidacji tej samej kombinacji), przegląd par centroidów pod kątem scalenia:
+Advisory lock z §2 zamyka najczęstszą przyczynę powstawania prawie identycznych centroidów (dwie współbieżne konsolidacje tej samej kombinacji). Nie zamyka drugiej: powolny dryf, w którym dwa centroidy powstałe w różnym czasie stają się z czasem bliskie sobie (np. baza kodu ujednolica styl, dwie wcześniej odrębne konwencje nazewnictwa zlewają się semantycznie). Dlatego `consolidation_supervisor` uruchamia dodatkowo, dużo rzadziej (co `MERGE_CHECK_INTERVAL`, domyślnie raz na 20 cykli konsolidacji tej samej kombinacji), przegląd par centroidów pod kątem scalenia. **Merge biegnie co 20 cykli konsolidacji dla tej samej kombinacji `(plugin_type, model_id)`.**
 
 ```rust
 /// @id: 7a2c9e4f-3b86-4d17-9f0a-5e8c2d6b3a71
@@ -287,7 +293,7 @@ pub async fn merge_centroids(tx: &mut Transaction<'_, Postgres>, plugin_type: &s
 
 ## 6. Dobór `join_threshold` — bez zmian merytorycznych, doprecyzowane miejsce zapisu
 
-`smartfs-cli init` (albo nowa podkomenda `smartfs-cli calibrate --plugin-type X --model Y`) wyznacza `join_threshold` empirycznie (percentyl rozkładu dystansów k-NN na próbce istniejących wektorów) i zapisuje wynik jako `INSERT ... ON CONFLICT (plugin_type, model_id) DO UPDATE` do `consolidation_thresholds` — nie do `smartfs.toml`. Dopóki wiersz nie istnieje, `spawn_all_consolidation_supervisors` świadomie nie odpala supervisora dla tej kombinacji (fail-safe, patrz migracja 005 §4).
+**`smartfs-cli calibrate --plugin-type X --model Y`** (zaimplementowane w v6.0; patrz też [`docs/crates/_unchanged.md`](crates/_unchanged.md) §calibrate) wyznacza `join_threshold` empirycznie (percentyl rozkładu dystansów k-NN na próbce istniejących wektorów) i zapisuje wynik jako `INSERT ... ON CONFLICT (plugin_type, model_id) DO UPDATE` do `consolidation_thresholds` — nie do `smartfs.toml`. Dopóki wiersz nie istnieje, `spawn_all_consolidation_supervisors` świadomie nie odpala supervisora dla tej kombinacji (fail-safe, patrz migracja 005 §4).
 
 ## 7. Zapytanie — scalanie warstwy roboczej i skrystalizowanej (bez zmian)
 

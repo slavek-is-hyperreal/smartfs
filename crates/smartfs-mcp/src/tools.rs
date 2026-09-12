@@ -21,6 +21,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
+                    "query": { "type": "string", "description": "Natural language query text (embedded on server if query_vector omitted)" },
                     "query_vector": { "type": "array", "items": { "type": "number" }, "description": "Dense embedding vector" },
                     "model_id": { "type": "string", "description": "Embedding model UUID" },
                     "limit": { "type": "integer", "description": "Maximum number of results to return" },
@@ -34,6 +35,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
+                    "query": { "type": "string", "description": "Function description or signature text (embedded on server if query_vector omitted)" },
                     "query_vector": { "type": "array", "items": { "type": "number" }, "description": "Dense embedding vector" },
                     "language": { "type": "string", "description": "Target programming language" },
                     "kind": { "type": "string", "description": "AST node kind filter (e.g. function, method)" },
@@ -109,10 +111,11 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "search_by_concept".to_string(),
-            description: "Searches centroid graph and working memory. If query_vector absent, returns active centroids sorted by member_count (ADR-50/53).".to_string(),
+            description: "Searches centroid graph and working memory. If query_vector and query absent, returns active centroids sorted by member_count (ADR-50/53).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
+                    "query": { "type": "string", "description": "Concept query text (embedded on server if query_vector omitted; if both omitted, browses active centroids)" },
                     "query_vector": { "type": "array", "items": { "type": "number" }, "description": "Optional dense query vector" },
                     "plugin_type": { "type": "string", "description": "Optional plugin type filter" },
                     "model_id": { "type": "string", "description": "Optional model UUID" },

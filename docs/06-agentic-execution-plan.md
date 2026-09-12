@@ -19,12 +19,12 @@ Podział z oryginalnej roadmapy (weekend 1, 2, 3...) był tempem dla człowieka.
 | Faza | Crate'y | Tryb | Thinking level | Powód |
 |---|---|---|---|---|
 | 0 | `smartfs-schema` + migracje 001→006 po kolei | sekwencyjnie, jeden agent | **high** | Kręgosłup — wszystko inne to importuje; błąd tu nie jest lokalny |
-| 1 | `smartfs-store`, `smartfs-compress`, `smartfs-ipfs` | równolegle (3 subagenty) | medium | Brak wzajemnych zależności poza schema (patrz graf w 02-crates.md) — bezpieczne do prawdziwej równoległości |
+| 1 | `smartfs-store`, potem `smartfs-compress`, potem `smartfs-ipfs` | **sekwencyjnie** (store najpierw, compress po store — compress importuje ze store) | medium | `smartfs-compress` importuje `smartfs-store`; równoległość store/compress byłaby błędem (compress nie skompiluje się bez gotowego store API). `smartfs-ipfs` może iść po compress. |
 | 2 | `smartfs-db`, potem `smartfs-ai` (**tylko ścieżka CPU/ONNX Runtime, ADR-49** — patrz Faza 7) | sekwencyjnie | **high** dla fragmentów dotykających FIX-01..10 i migracji 005/006; medium reszta | `smartfs-ai` zależy od `smartfs-db`+`smartfs-store`; to tu już raz złapano prawdziwy bug (plugin_type) |
-| 3 | `smartfs-semantic`, `smartfs-fuse` | równolegle (2 subagenty) | medium | Oba zależą tylko od db+schema, nie od siebie nawzajem (graf w 02-crates.md) |
+| 3 | `smartfs-semantic`, `smartfs-fuse` | równolegle (2 subagenty) | medium | Oba zależą tylko od db+schema, nie od siebie nawzajem (graf w 02-crates.md). Uwaga: `smartfs-fuse` zależy od `smartfs-db`, **nie** od `smartfs-ai` — może biec równolegle z `smartfs-ai` (Faza 2b), nie blokuje go. |
 | 4 | `smartfs-mcp`, potem `smartfs-cli` | sekwencyjnie | medium | Zależą od prawie wszystkiego powyżej |
-| 5 | `smartfs-docgen` | niezależnie, może iść równolegle z fazami 1-4 od początku | medium | Dev-tool skanujący pliki jako tekst — nie linkuje się z resztą crate'ów |
-| 6 | Integracja | sekwencyjnie, jeden agent | **high** | `cargo check --workspace`, `clippy --workspace`, backfill `@id` przez `smartfs-docgen`, weryfikacja `docs/symbol_registry.json`, testy per crate |
+| 5 | `smartfs-docgen` — **BUDOWANY** w tej fazie | niezależnie, może iść równolegle z fazami 1-4 od początku | medium | Dev-tool skanujący pliki jako tekst — nie linkuje się z resztą crate'ów. Faza 5 = build + unit testy `smartfs-docgen`. |
+| 6 | Integracja | sekwencyjnie, jeden agent | **high** | `cargo check --workspace`, `clippy --workspace`, backfill `@id` przez `smartfs-docgen` (**WERYFIKACJA** — `smartfs-docgen check`, nie build), weryfikacja `docs/symbol_registry.json`, testy per crate |
 | 7 | **Post-MVP, opcjonalna** — ścieżka GPU w `smartfs-ai` (bindingi FFI do `ggml`/`llama.cpp` zbudowanego wyłącznie z backendem Vulkan, ADR-55) | sekwencyjnie, jeden agent, **dopiero po zakończeniu Fazy 6** | high | Osobny silnik inferencji, zależność zewnętrzna (C++ przez FFI) — nigdy nie blokuje pierwszego działającego demona na CPU (ADR-55, Konsekwencje) |
 
 ## Zasady dla każdego subagenta (żeby nie kolidowały)
@@ -46,6 +46,8 @@ docs/02-crates.md → docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md (pełna
 architektura bazowa v4.5, na której v6.0 jest przyrostem — cytowana przez
 docs/crates/*.md per numer §3.x) → docs/base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md
 (FIX-01..10) → docs/03-consolidation-design.md → docs/04-uuid-doc-linking.md
+→ docs/adr/*.md (w kolejności numerycznej: ADR-49, ADR-50, ADR-51, ADR-52,
+ADR-53, ADR-54, ADR-55, ADR-56, ADR-57)
 → docs/05-code-comments.md → docs/06-agentic-execution-plan.md (ten plik —
 zawiera fazy i twarde zasady niżej) → migrations/*.sql w kolejności numerycznej
 (001 do 006) → docs/crates/*.md (w tym docs/crates/_unchanged.md dla crate'ów

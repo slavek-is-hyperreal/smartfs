@@ -10,4 +10,12 @@ Poniższe crate'y dziedziczą swoje CLAUDE.md wprost z [SmartFS_Architecture_v4_
 - **smartfs-ipfs** (§3.9) — `IpfsStore`, CID <256KB, bez zmian.
 - **smartfs-cli** (§3.10) — delta kosmetyczna: nowa podkomenda `smartfs-cli concepts [--plugin-type X]`, cienka delegacja do `smartfs_semantic::search_by_concept` bez `query` — przegląd grafu centroidów z terminala. Poza tym bez zmian.
 
+  **§calibrate** — nowa podkomenda `calibrate`:
+
+  ```
+  cargo run -p smartfs-cli -- calibrate --plugin-type <type> --model <model-name>
+  ```
+
+  Działanie: próbkuje istniejące wektory dla danej kombinacji `(plugin_type, model_id)`, oblicza empiryczny `join_threshold` (percentyl p75 rozkładu dystansów k-NN), i upsertuje wiersz do `consolidation_thresholds`. **Musi być uruchomiona przed** `spawn_all_consolidation_supervisors` — jeśli wiersz w `consolidation_thresholds` nie istnieje, supervisor dla tej kombinacji nie jest uruchamiany (fail-safe).
+
 Jeśli któryś z tych crate'ów wymaga zmiany w przyszłości, odpowiedni plik powinien zostać wydzielony tutaj analogicznie do `smartfs-db.md`/`smartfs-ai.md`/`smartfs-mcp.md` w tym katalogu, nie dopisywany do tego zbiorczego pliku.

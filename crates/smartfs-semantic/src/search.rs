@@ -6,6 +6,8 @@ use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::types::CentroidSummary;
+
 /// @id: 5e9b1023-4182-4f33-8a02-1b9c7d4e5f60
 /// Source layer of a concept search hit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,4 +293,68 @@ pub fn merge_by_similarity(
     });
     all.truncate(limit);
     all
+}
+
+/// @id: 4a2d8e19-3f05-4c92-b817-5e9d2c4b1a88
+/// Lists active centroids across concept tables, optionally filtered by plugin_type and model_id,
+/// ordered by member_count descending.
+pub async fn list_active_centroids(
+    db: &PgPool,
+    plugin_type: Option<&str>,
+    model_id: Option<Uuid>,
+    limit: usize,
+) -> Result<Vec<CentroidSummary>> {
+    let mut summaries = Vec::new();
+    let tables = [
+        "concept_centroids_1536",
+        "concept_centroids_1024_qwen",
+        "concept_centroids_768",
+        "concept_centroids_384",
+    ];
+
+    for tbl in tables {
+        let mut sql = format!(
+            "SELECT id, plugin_type, model_id, member_count, label FROM {tbl} WHERE is_active = TRUE"
+        );
+        if plugin_type.is_some() {
+            sql.push_str(" AND plugin_type = $1");
+        }
+        if model_id.is_some() {
+            if plugin_type.is_some() {
+                sql.push_str(" AND model_id = $2");
+            } else {
+                sql.push_str(" AND model_id = $1");
+            }
+        }
+        sql.push_str(" ORDER BY member_count DESC");
+
+        let mut q = sqlx::query(&sql);
+        if let Some(pt) = plugin_type {
+            q = q.bind(pt);
+        }
+        if let Some(m) = model_id {
+            q = q.bind(m);
+        }
+
+        if let Ok(rows) = q.fetch_all(db).await {
+            for row in rows {
+                let id: Uuid = row.try_get("id").map_err(|e| SmartFsError::Db(e.to_string()))?;
+                let p_type: String = row.try_get("plugin_type").map_err(|e| SmartFsError::Db(e.to_string()))?;
+                let m_id: Uuid = row.try_get("model_id").map_err(|e| SmartFsError::Db(e.to_string()))?;
+                let count: i64 = row.try_get("member_count").map_err(|e| SmartFsError::Db(e.to_string()))?;
+                let label: Option<String> = row.try_get("label").ok();
+                summaries.push(CentroidSummary {
+                    id,
+                    plugin_type: p_type,
+                    model_id: m_id,
+                    member_count: count,
+                    label,
+                });
+            }
+        }
+    }
+
+    summaries.sort_by_key(|s| std::cmp::Reverse(s.member_count));
+    summaries.truncate(limit);
+    Ok(summaries)
 }

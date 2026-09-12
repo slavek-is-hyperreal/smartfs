@@ -38,4 +38,11 @@ Traktowane jako osobny, dodatkowy embedding (nowa tabela, nowy `plugin_type` w s
 
 ## Otwarte pytanie, świadomie nierozwiązane w tej wersji
 
-Rodzina Qwen (stan na moment pisania) nie ma dojrzałego, kontrastywnie trenowanego modelu embeddingowego dla audio analogicznego do CLAP. Jeśli SmartFS ma docelowo objąć też pliki muzyczne/dźwiękowe jako "sygnał", to wymaga osobnej decyzji o modelu spoza rodziny Qwen — nie rozstrzygamy tego w ADR-49.
+Rodzina Qwen (stan na moment pisania) nie ma dojrzałego, kontrastywnie trenowanego modelu embeddingowego dla audio analogicznego do CLAP. Jeśli SmartFS ma docelowo objąć też pliki muzyczne/dźwiękowe jako „sygnał", to wymaga osobnej decyzji o modelu spoza rodziny Qwen — nie rozstrzygamy tego w ADR-49.
+
+## Addendum (po implementacji v6.0)
+
+- **Qwen3-VL-Embedding-2B** (embedding obrazów) jest **post-MVP** — jawnie zdegradowany per B-06. Brak tabeli `embeddings_1024_qwen_vl` w migracjach 001-006. Zostanie dodany w przyszłej migracji, gdy pipeline embeddingowy dla obrazów zostanie zaimplementowany.
+- **BGE-M3** (768d) jest **zachowany** dla zewnętrznych, prekalkulowanych korpusów (Wikipedia, encyklopedie — ADR-06). Tabele (`embeddings_768`, `concept_centroids_768`) pozostają w schemacie.
+- **Qwen3-Embedding-4B** (2560d) to przyszły tier dokładnościowy, post-MVP — brak tabeli `embeddings_2560` w aktualnym schemacie.
+- **Fallback offline:** jeśli domyślny model nie jest dostępny w czasie uruchomienia, fallback idzie na aktywny model `is_default=TRUE` w chwili startu — nie na zahardkodowaną stałą MiniLM.

@@ -393,7 +393,7 @@ wtedy sub-sharding tej partycji, też migracją (RANGE po shard_index). embeddin
 zostaje jako rejestr metadanych, ale NIE steruje runtime DDL.
 ```
 
-**Uwaga:** tabela `ast_embeddings_1536` z §6 dokumentu głównego dostaje wtedy kolumnę `plugin_type` i klauzulę `PARTITION BY LIST (plugin_type)`. Zsynchronizuj definicję w §6 z powyższą, żeby dokument główny i roadmap się nie rozjechały. Migracja `003_embeddings.sql` tworzy tabelę partycjonowaną + partycje dla języków z `plugins/` obecnych na starcie.
+**Uwaga:** tabela `ast_embeddings_1536` z §6 dokumentu głównego dostaje wtedy kolumnę `plugin_type` i klauzulę `PARTITION BY LIST (plugin_type)`. Zsynchronizuj definicję w §6 z powyższą, żeby dokument główny i roadmap się nie rozjechały. Migracja `003_embeddings.sql` tworzy tabelę partycjonowaną + partycje dla języków z `plugins/` obecnych na starcie. *(roadmap §3b — post-MVP; nie wchodzi do migracji 001-006)*
 
 ---
 

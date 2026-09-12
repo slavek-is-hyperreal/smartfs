@@ -41,7 +41,7 @@ Dwa dokumenty operacyjne, dodane po pierwszym review specyfikacji:
 | Co | Zmiana | Gdzie |
 |---|---|---|
 | Domyślny model embeddingowy | `all-MiniLM-L6-v2` → `Qwen3-Embedding-0.6B` (1024d) | [ADR-49](docs/adr/ADR-49-qwen-default-model.md) |
-| Nowa rodzina embeddingów obrazowych | `png.json` i inne pliki obrazowe dostają embedding (`Qwen3-VL-Embedding-2B`) zamiast `null` | [ADR-49](docs/adr/ADR-49-qwen-default-model.md) |
+| Nowa rodzina embeddingów obrazowych | `png.json` i inne pliki obrazowe dostają embedding (`Qwen3-VL-Embedding-2B`) zamiast `null` **(post-MVP)** | [ADR-49](docs/adr/ADR-49-qwen-default-model.md) |
 | Nowa warstwa: konsolidacja semantyczna | Bufor roboczy (świeże embeddingi) + okresowy akt scalenia w graf centroidów + graf leksykalny (słowo → centroid) | [ADR-50](docs/adr/ADR-50-working-memory-consolidation.md), [docs/03](docs/03-consolidation-design.md) |
 | Serializacja konsolidacji + merge duplikatów centroidów | Jeden supervisor per `(plugin_type, model_id)`, `pg_try_advisory_lock`, `merge_centroids` jako backstop przeciw dryfującym duplikatom | [ADR-53](docs/adr/ADR-53-consolidation-concurrency.md) |
 | Backend pełnotekstowy (BM25) | `pg_search` (Tantivy w Postgresie) zamiast gołego `tsvector` — jedyna opcja z natywnym polskim stemmingiem; nowa kolumna `file_versions.search_text`, nowe narzędzie MCP `search_fulltext` | [ADR-54](docs/adr/ADR-54-fulltext-search-backend.md), [migracja 006](migrations/006_fulltext_search.sql) |
@@ -63,6 +63,22 @@ Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedzicz
 v6.0 rozszerza to o jedno zdanie:
 
 > Znaczenie nie jest pojedynczym wektorem. Znaczenie jest miejscem w grafie pojęć, do którego wektor został przypisany aktem konsolidacji.
+
+## Root Invariants (8 zasad nienaruszalnych)
+
+Pełna lista z uzasadnieniami: [docs/01-architecture.md §Invarianty](docs/01-architecture.md#invarianty--rozszerzenie-root-claudemd)
+
+**Z v4.5 (Root CLAUDE.md §3.1):**
+1. `content_hash = SHA-256(oryginalne bajty PRZED kompresją)` — nigdy po
+2. Każda zmiana treści tworzy nowy wiersz `file_versions` (CoW) — nigdy nie mutuje bloba
+3. Jedyna legalna ścieżka do danych wiedzie przez daemon — ext4 to głupi magazyn blobów
+4. Migracje są jawne w `migrations/` — żadnego `CREATE TABLE` w kodzie runtime
+5. Nigdy nie mieszaj wymiarów embeddingów między zapytaniami — 384 z 384, 1536 z 1536
+
+**Nowe w v6.0:**
+6. `smartfs-semantic` nigdy nie blokuje ani nie spowalnia `cow_commit` ani workera `smartfs-ai`
+7. Centroid nie jest nigdy przeliczany globalnie w locie — tylko lokalnie, przy akcie konsolidacji
+8. Każdy publiczny symbol Rust w `crates/` ma dokładnie jeden `@id` (UUID v4), nadany raz i nigdy nie zmieniany
 
 ## Wizja daleka (nie część v6.0 — nie wymagane czytanie przed budową)
 

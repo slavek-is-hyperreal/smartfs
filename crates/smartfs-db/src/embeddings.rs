@@ -149,3 +149,14 @@ pub async fn get_model_id_by_name(pool: &PgPool, name: &str) -> Result<Option<Uu
         .await
         .map_err(|e| SmartFsError::Db(format!("get_model_id_by_name error: {e}")))
 }
+
+/// @id: 4ef789ab-1234-a567-89ab-cdef01234567
+/// Look up the dimension size of an embedding model.
+pub async fn get_model_dimensions(pool: &PgPool, model_id: Uuid) -> Result<Option<i32>> {
+    sqlx::query_scalar("SELECT dimensions FROM embedding_models WHERE id = $1")
+        .bind(model_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| SmartFsError::Db(format!("get_model_dimensions error: {e}")))
+}
+

@@ -181,3 +181,45 @@ async fn test_search_by_concept_without_vector() {
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
+
+#[tokio::test]
+async fn test_search_semantic_and_functions_query_handling() {
+    let pool = match connect_pool(&get_db_url()).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let temp_dir = std::env::temp_dir().join(format!("smartfs_test_{}", uuid::Uuid::new_v4()));
+    let _ = tokio::fs::create_dir_all(&temp_dir).await;
+    let store = Arc::new(LocalDiskStore::new(&temp_dir));
+    let handler = ToolHandler::new(pool, store, None);
+
+    // 1. Missing both query and query_vector must fail with SyntaxError (not silent empty list)
+    let sem_err = handler
+        .dispatch_tool_call("search_semantic", serde_json::json!({}))
+        .await;
+    assert!(sem_err.is_err(), "search_semantic without query or vector must return Err");
+
+    let fn_err = handler
+        .dispatch_tool_call("search_functions", serde_json::json!({}))
+        .await;
+    assert!(fn_err.is_err(), "search_functions without query or vector must return Err");
+
+    // 2. Providing text query computes embedding server-side
+    let sem_ok = handler
+        .dispatch_tool_call(
+            "search_semantic",
+            serde_json::json!({ "query": "memory allocation buffer", "limit": 5 }),
+        )
+        .await;
+    assert!(sem_ok.is_ok(), "search_semantic with text query must succeed: {:?}", sem_ok);
+
+    let fn_ok = handler
+        .dispatch_tool_call(
+            "search_functions",
+            serde_json::json!({ "query": "fn process_data()", "language": "rust", "limit": 5 }),
+        )
+        .await;
+    assert!(fn_ok.is_ok(), "search_functions with text query must succeed: {:?}", fn_ok);
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}

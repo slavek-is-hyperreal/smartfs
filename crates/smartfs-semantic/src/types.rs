@@ -50,3 +50,14 @@ pub struct CentroidMemberWithVector {
     pub id: Uuid,
     pub vector: Vec<f32>,
 }
+
+/// @id: 593b4e72-1c29-4d83-9b41-2a0e5f8a1c90
+/// Summary of an active concept centroid.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CentroidSummary {
+    pub id: Uuid,
+    pub plugin_type: String,
+    pub model_id: Uuid,
+    pub member_count: i64,
+    pub label: Option<String>,
+}

@@ -102,3 +102,32 @@ cargo clippy -p smartfs-semantic
 ## Uwaga o testowalności
 
 `welford_update`, `variance_from_m2`, `kmeans2` i `combine_centroids` są celowo czystymi funkcjami bez zależności od `sqlx`/`Pool` — testowalne jednostkowo bez Dockera z PostgreSQL. Sugerowane przypadki testowe: pusty bufor, pojedynczy punkt (wariancja=0, brak rozszczepienia), dystans dokładnie równy `join_threshold` (rozstrzygnięcie: `<=` dołącza, patrz docs/03 §5 — graniczny przypadek trzeba testować jawnie, nie zakładać), `kmeans2` na dwóch identycznych punktach (zdegenerowany przypadek — oba klastry powinny wyjść identyczne, nie crashować).
+
+## Symbole niezadokumentowane wcześniej (B-14, S-07, S-16)
+
+| Symbol | Sygnatura (skrót) | Opis |
+|---|---|---|
+| `list_active_centroids` | `async fn(pool, plugin_type, model_id, limit) -> Result<Vec<CentroidSummary>>` | Zwraca aktywne (nie-tombstoned, `is_active=TRUE`) centroidy dla danej kombinacji `(plugin_type, model_id)` |
+| `CentroidSummary` | Struct | `id: Uuid`, `label: Option<String>`, `member_count: i64`, `centroid: Vec<f32>` |
+| `create_centroid_from` | `async fn(tx, plugin_type, model_id, item) -> Result<Uuid>` | Tworzy nowy centroid z pojedynczego buforowanego wektora |
+| `create_centroid_from_cluster` | `async fn(tx, cluster) -> Result<Uuid>` | Tworzy centroid z wyliczonej struktury `Cluster` |
+| `deactivate_centroid` | `async fn(tx, centroid_id) -> Result<()>` | Ustawia `is_active=FALSE`; nigdy nie wykonuje `DELETE` |
+| `reparent_members` | `async fn(tx, old_a, old_b, new_id) -> Result<()>` | Przepisuje wiersze członków po scaleniu — `old_a` i `old_b` → `new_id` |
+| `fetch_centroid_members_with_vectors` | `async fn(tx, centroid_id) -> Result<Vec<CentroidMemberWithVector>>` | Pobiera członków centroidu wraz z ich wektorami embeddingów |
+| `find_mergeable_pairs` | `async fn(tx, plugin_type, model_id, threshold) -> Result<Vec<(ConceptCentroid, ConceptCentroid)>>` | Wyszukuje pary aktywnych centroidów bliższych niż `threshold` |
+| `label_centroid_from_members` | `async fn(tx, centroid_id) -> Result<Option<String>>` | Etykietowanie TF-IDF; uruchamiane gdy `member_count` zmieni się o >20% od ostatniego przeliczenia |
+| `import_wordnet` | `async fn(db, path, language) -> Result<usize>` | Import z ustandaryzowanego formatu pośredniego JSON; patrz docs/03 §8 |
+
+## SchemaFamily — routing tabel per wymiar
+
+Kombinacja `(plugin_type, model_id)` mapuje się na konkretną parę tabel centroidów/członków w zależności od wymiaru wektora:
+
+| Wymiar | Tabela centroidów | Tabela członków | Member ref |
+|---|---|---|---|
+| 1536d | `concept_centroids_1536` | `centroid_members_1536` | `ast_nodes` |
+| 1024d | `concept_centroids_1024_qwen` | `centroid_members_1024_qwen` | `file_versions` |
+| 768d | `concept_centroids_768` | `centroid_members_768` | `file_versions` |
+| 384d | `concept_centroids_384` | `centroid_members_384` | `file_versions` |
+
+Routing odbywa się przez `SchemaFamily` — enum lub lookup na podstawie `model_id.dimensions` z `embedding_models`. Zgodnie z Invariant #5 (nigdy nie mieszaj wymiarów) żadna funkcja nie przeszukuje więcej niż jednej rodziny naraz.
+

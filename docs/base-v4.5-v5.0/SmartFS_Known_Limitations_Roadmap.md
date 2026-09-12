@@ -338,7 +338,7 @@ let texts: Vec<String> = batch.iter().map(|id| get_text(id)).collect();
 let embeddings = model.encode_batch(&texts).await; // jeden forward pass
 ```
 
-### 7c. GPU (jeśli dostępne)
+### 7c. GPU (jeśli dostępne) *(superseded by ADR-55 — GPU acceleration via Vulkan only; CUDA/ROCm/HIP excluded by architectural decision)*
 KOVAL rule dla `min_gpu_vram_gb = 4.0` już w `koval.toml`.
 ONNX Runtime z `CUDAExecutionProvider` — bez zmian w kodzie embeddingu.
 Inference BGE-M3 na GPU: ~100ms zamiast ~5s na CPU.

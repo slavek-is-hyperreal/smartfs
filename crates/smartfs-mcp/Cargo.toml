@@ -10,6 +10,7 @@ smartfs-schema = { workspace = true }
 smartfs-db = { workspace = true }
 smartfs-semantic = { workspace = true }
 smartfs-store = { workspace = true }
+smartfs-ai = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }

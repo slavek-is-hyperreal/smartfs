@@ -1,3 +1,8 @@
+> ⚠️ **DOKUMENT ARCHIWALNY (pre-FIX, v4.5):** Ten dokument opisuje architekturę PRZED zastosowaniem poprawek FIX-01..FIX-10.
+> Aktualny stan implementacji = v4.5 **+** [SmartFS_v4.5_to_v5.0_fixes.md](SmartFS_v4.5_to_v5.0_fixes.md) (wtopione do migracji 001-004 i kodu).
+> Cytaty z tego dokumentu w `docs/crates/*.md` używają numerów sekcji z tego pliku — szukaj ich tutaj.
+> **Nie stosuj żadnych wzorców z §6 (DDL) ani §11 bezpośrednio** — używaj zamiast tego aktualnych `migrations/*.sql`.
+
 # SmartFS: Unified Knowledge Storage Layer
 ## Dokument Architektoniczny v4.5 (RFC / System Design)
 
@@ -1053,7 +1058,7 @@ Pluginy w British English z opisami pól — standard dla agentów semantycznych
 | Kod per-funkcja | `ast_embeddings_1536` | patrz niżej | AST nodes |
 
 **Model dla `ast_embeddings_1536`:**
-- Domyślnie: `all-MiniLM-L6-v2` (384d w tabeli `ast_embeddings_384`) — offline, zawsze działa
+- Domyślnie: `all-MiniLM-L6-v2` (384d w tabeli `ast_embeddings_384`) *(nie istnieje — AST embeddingi są wyłącznie w ast_embeddings_1536, patrz migracja 004; ast_embeddings_384 było wspomniane przez pomyłkę)* — offline, zawsze działa
 - Opt-in: `text-embedding-3-large` (1536d) — wymaga `OPENAI_API_KEY`
 - Opt-in lokalny: `CodeBERT` lub `StarEncoder` przez ONNX — offline, lepszy dla kodu niż MiniLM
 

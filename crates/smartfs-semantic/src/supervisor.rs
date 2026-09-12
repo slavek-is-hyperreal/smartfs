@@ -225,41 +225,39 @@ pub async fn consolidation_supervisor(db: PgPool, combo: (String, Uuid)) {
             || (backlog > 0 && last_run.elapsed() >= cfg.idle_before_sleep);
 
         if should_run {
-            let lock_key = advisory_lock_key(&plugin_type, model_id);
-            if try_advisory_lock(&db, lock_key).await.unwrap_or(false) {
-                match consolidate_batch(&db, &plugin_type, model_id, &cfg).await {
-                    Ok(n) => {
+            match consolidate_batch(&db, &plugin_type, model_id, &cfg).await {
+                Ok(n) => {
+                    if n > 0 {
                         tracing::info!("consolidated {n} vectors for {plugin_type}/{model_id}");
-                        last_run = Instant::now();
-                        cycles_since_merge += 1;
+                    }
+                    last_run = Instant::now();
+                    cycles_since_merge += 1;
 
-                        if cycles_since_merge >= MERGE_CHECK_INTERVAL_CYCLES {
-                            cycles_since_merge = 0;
-                            let merge_thresh = cfg.join_threshold / 2.0;
-                            if let Ok(mut tx) = db.begin().await {
-                                match merge_centroids(&mut tx, &plugin_type, model_id, merge_thresh)
-                                    .await
-                                {
-                                    Ok(merged_count) => {
-                                        if let Err(e) = tx.commit().await {
-                                            tracing::error!("failed to commit merge_centroids: {e}");
-                                        } else if merged_count > 0 {
-                                            tracing::info!(
-                                                "merged {merged_count} centroid pairs for {plugin_type}/{model_id}"
-                                            );
-                                        }
+                    if cycles_since_merge >= MERGE_CHECK_INTERVAL_CYCLES {
+                        cycles_since_merge = 0;
+                        let merge_thresh = cfg.join_threshold / 2.0;
+                        if let Ok(mut tx) = db.begin().await {
+                            match merge_centroids(&mut tx, &plugin_type, model_id, merge_thresh)
+                                .await
+                            {
+                                Ok(merged_count) => {
+                                    if let Err(e) = tx.commit().await {
+                                        tracing::error!("failed to commit merge_centroids: {e}");
+                                    } else if merged_count > 0 {
+                                        tracing::info!(
+                                            "merged {merged_count} centroid pairs for {plugin_type}/{model_id}"
+                                        );
                                     }
-                                    Err(e) => {
-                                        tracing::error!("merge_centroids failed: {e}");
-                                        let _ = tx.rollback().await;
-                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("merge_centroids failed: {e}");
+                                    let _ = tx.rollback().await;
                                 }
                             }
                         }
                     }
-                    Err(e) => tracing::error!("consolidation batch failed: {e}"),
                 }
-                release_advisory_lock(&db, lock_key).await.ok();
+                Err(e) => tracing::error!("consolidation batch failed: {e}"),
             }
         } else {
             tokio::time::sleep(Duration::from_secs(60)).await;

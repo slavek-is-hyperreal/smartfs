@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use smartfs_ai::CpuEmbeddingEngine;
 use smartfs_db::{FileVersionRecord, FulltextHit, InodeRecord, PgPool};
 use smartfs_schema::error::{Result, SmartFsError};
 use smartfs_store::BlobStore;
@@ -78,6 +79,10 @@ impl ToolHandler {
     ) -> Result<serde_json::Value> {
         match name {
             "search_semantic" => {
+                let query: Option<String> = arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let query_vector: Option<Vec<f32>> = arguments
                     .get("query_vector")
                     .and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -95,11 +100,15 @@ impl ToolHandler {
                     .map(|s| s.to_string());
 
                 let hits = self
-                    .search_semantic(query_vector, model_id, limit, type_filter)
+                    .search_semantic(query, query_vector, model_id, limit, type_filter)
                     .await?;
                 Ok(serde_json::to_value(hits).map_err(|e| SmartFsError::Other(e.to_string()))?)
             }
             "search_functions" => {
+                let query: Option<String> = arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let query_vector: Option<Vec<f32>> = arguments
                     .get("query_vector")
                     .and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -117,7 +126,7 @@ impl ToolHandler {
                     .map(|n| n as usize);
 
                 let hits = self
-                    .search_functions(query_vector, language, kind, limit)
+                    .search_functions(query, query_vector, language, kind, limit)
                     .await?;
                 Ok(serde_json::to_value(hits).map_err(|e| SmartFsError::Other(e.to_string()))?)
             }
@@ -179,6 +188,10 @@ impl ToolHandler {
                 Ok(serde_json::to_value(diff).map_err(|e| SmartFsError::Other(e.to_string()))?)
             }
             "search_by_concept" => {
+                let query: Option<String> = arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let query_vector: Option<Vec<f32>> = arguments
                     .get("query_vector")
                     .and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -196,7 +209,7 @@ impl ToolHandler {
                     .map(|n| n as usize);
 
                 let res = self
-                    .search_by_concept(query_vector, plugin_type, model_id, limit)
+                    .search_by_concept(query, query_vector, plugin_type, model_id, limit)
                     .await?;
                 Ok(res)
             }
@@ -336,19 +349,30 @@ impl ToolHandler {
     /// `search_semantic`: cosine search across general embedding tables.
     pub async fn search_semantic(
         &self,
+        query: Option<String>,
         query_vector: Option<Vec<f32>>,
         model_id: Option<Uuid>,
         limit: Option<usize>,
         type_filter: Option<String>,
     ) -> Result<Vec<smartfs_semantic::ConceptSearchHit>> {
-        let q_vec = match query_vector {
-            Some(v) => v,
-            None => return Ok(Vec::new()),
-        };
-
         let m_id = match model_id {
             Some(m) => m,
             None => smartfs_db::get_default_model_id(&self.pool).await?,
+        };
+
+        let q_vec = if let Some(v) = query_vector {
+            v
+        } else if let Some(q) = query {
+            let dim = smartfs_db::get_model_dimensions(&self.pool, m_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(1024);
+            CpuEmbeddingEngine::compute_vector(&q, dim as usize)
+        } else {
+            return Err(SmartFsError::SyntaxError(
+                "Either 'query' or 'query_vector' must be provided to search_semantic".to_string(),
+            ));
         };
 
         let lim = limit.unwrap_or(10);
@@ -361,20 +385,25 @@ impl ToolHandler {
     /// `search_functions`: cosine search on function-level AST embeddings.
     pub async fn search_functions(
         &self,
+        query: Option<String>,
         query_vector: Option<Vec<f32>>,
         language: Option<String>,
         _kind: Option<String>,
         limit: Option<usize>,
     ) -> Result<Vec<smartfs_semantic::ConceptSearchHit>> {
-        let q_vec = match query_vector {
-            Some(v) => v,
-            None => return Ok(Vec::new()),
-        };
-
-        // For AST 1536-dim search, look up model or fall back to default
         let m_id = match smartfs_db::get_model_id_by_name(&self.pool, "text-embedding-3-large").await? {
             Some(id) => id,
             None => smartfs_db::get_default_model_id(&self.pool).await?,
+        };
+
+        let q_vec = if let Some(v) = query_vector {
+            v
+        } else if let Some(q) = query {
+            CpuEmbeddingEngine::compute_vector(&q, 1536)
+        } else {
+            return Err(SmartFsError::SyntaxError(
+                "Either 'query' or 'query_vector' must be provided to search_functions".to_string(),
+            ));
         };
 
         let lang = language.unwrap_or_else(|| "rust".to_string());
@@ -522,55 +551,88 @@ impl ToolHandler {
     }
 
     /// @id: 63c8f929-a967-47e9-92b0-794eab8aac30
-    /// `search_by_concept`: delegates to `smartfs_semantic::search_by_concept` if vector given,
+    /// `search_by_concept`: delegates to `smartfs_semantic::search_by_concept` if vector or query text given,
     /// or returns list of active centroids sorted by `member_count` (ADR-50/53).
     pub async fn search_by_concept(
         &self,
+        query: Option<String>,
         query_vector: Option<Vec<f32>>,
         plugin_type: Option<String>,
         model_id: Option<Uuid>,
         limit: Option<usize>,
     ) -> Result<serde_json::Value> {
-        if let Some(vec) = query_vector {
-            let m_id = match model_id {
-                Some(m) => m,
-                None => smartfs_db::get_default_model_id(&self.pool).await?,
-            };
-            let p_type = plugin_type.unwrap_or_else(|| "generic".to_string());
-            let lim = limit.unwrap_or(10);
+        let m_id = match model_id {
+            Some(m) => m,
+            None => smartfs_db::get_default_model_id(&self.pool).await?,
+        };
+        let p_type = plugin_type.unwrap_or_else(|| "generic".to_string());
+        let lim = limit.unwrap_or(10);
+
+        let vec_opt = if let Some(vec) = query_vector {
+            Some(vec)
+        } else if let Some(q) = query {
+            let dim = smartfs_db::get_model_dimensions(&self.pool, m_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(1024);
+            Some(CpuEmbeddingEngine::compute_vector(&q, dim as usize))
+        } else {
+            None
+        };
+
+        if let Some(vec) = vec_opt {
             let hits = smartfs_semantic::search_by_concept(&self.pool, &vec, &p_type, m_id, lim).await?;
             Ok(serde_json::to_value(hits).map_err(|e| SmartFsError::Other(e.to_string()))?)
         } else {
-            // When query_vector is absent: returns list of active centroids
-            let combos = smartfs_semantic::fetch_calibrated_combinations(&self.pool)
-                .await
-                .unwrap_or_default();
+            // When query_vector and query are absent: browse active centroids
+            let target_plugin = if p_type == "generic" { None } else { Some(p_type.as_str()) };
+            let centroids = smartfs_semantic::list_active_centroids(
+                &self.pool,
+                target_plugin,
+                Some(m_id),
+                lim,
+            )
+            .await?;
 
-            let target_plugin = plugin_type.as_deref();
-            let mut summaries: Vec<CentroidSummary> = Vec::new();
+            if !centroids.is_empty() {
+                let summaries: Vec<CentroidSummary> = centroids
+                    .into_iter()
+                    .map(|c| CentroidSummary {
+                        id: c.id,
+                        label: c.label.clone(),
+                        member_count: c.member_count,
+                        sample_names: vec![c.label.unwrap_or_else(|| c.plugin_type.clone())],
+                    })
+                    .collect();
+                Ok(serde_json::to_value(summaries).map_err(|e| SmartFsError::Other(e.to_string()))?)
+            } else {
+                let combos = smartfs_semantic::fetch_calibrated_combinations(&self.pool)
+                    .await
+                    .unwrap_or_default();
 
-            for (p_type, m_id) in combos {
-                if let Some(target) = target_plugin {
-                    if p_type != target {
-                        continue;
+                let mut summaries: Vec<CentroidSummary> = Vec::new();
+                for (pt, mid) in combos {
+                    if let Some(target) = target_plugin {
+                        if pt != target {
+                            continue;
+                        }
+                    }
+                    if let Ok(cfg) = smartfs_semantic::load_consolidation_config(&self.pool, &pt, mid).await {
+                        summaries.push(CentroidSummary {
+                            id: mid,
+                            label: Some(pt.clone()),
+                            member_count: cfg.backlog_threshold,
+                            sample_names: vec![pt],
+                        });
                     }
                 }
-                if let Ok(cfg) = smartfs_semantic::load_consolidation_config(&self.pool, &p_type, m_id).await {
-                    summaries.push(CentroidSummary {
-                        id: m_id,
-                        label: Some(p_type.clone()),
-                        member_count: cfg.backlog_threshold,
-                        sample_names: vec![p_type],
-                    });
-                }
-            }
 
-            summaries.sort_by_key(|a| std::cmp::Reverse(a.member_count));
-            if let Some(lim) = limit {
+                summaries.sort_by_key(|a| std::cmp::Reverse(a.member_count));
                 summaries.truncate(lim);
-            }
 
-            Ok(serde_json::to_value(summaries).map_err(|e| SmartFsError::Other(e.to_string()))?)
+                Ok(serde_json::to_value(summaries).map_err(|e| SmartFsError::Other(e.to_string()))?)
+            }
         }
     }
 

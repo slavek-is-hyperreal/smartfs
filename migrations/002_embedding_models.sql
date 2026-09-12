@@ -27,3 +27,10 @@ INSERT INTO embedding_models (name, dimensions, version, is_local, is_default) V
 
 -- ── Weryfikacja po migracji ──────────────────────────────────────────
 -- [ ] dokładnie jeden wiersz is_default=TRUE (all-MiniLM-L6-v2, do cutoveru w migracji 005)
+
+-- Partial unique index: co najwyżej jeden is_default=TRUE w całej tabeli (S-13).
+-- Migracja 005 robi UPDATE SET is_default=FALSE na starym domyślnym i INSERT
+-- nowego z is_default=TRUE — kolejność ma znaczenie, bo index działa od razu.
+CREATE UNIQUE INDEX uq_single_default_embedding_model
+    ON embedding_models (is_default)
+    WHERE is_default = TRUE;

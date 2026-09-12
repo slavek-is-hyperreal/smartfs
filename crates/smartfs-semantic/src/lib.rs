@@ -35,11 +35,13 @@ pub use lexical::{
     WordnetNodeImport,
 };
 pub use search::{
-    brute_force_unconsolidated, merge_by_similarity, search_by_concept, search_via_centroids,
-    ConceptSearchHit, HitSource,
+    brute_force_unconsolidated, list_active_centroids, merge_by_similarity, search_by_concept,
+    search_via_centroids, ConceptSearchHit, HitSource,
 };
 pub use supervisor::{
     advisory_lock_key, consolidation_supervisor, fetch_calibrated_combinations, pg_hash_bytes,
     release_advisory_lock, spawn_all_consolidation_supervisors, try_advisory_lock,
 };
-pub use types::{BufferedVector, CentroidMember, CentroidMemberWithVector, ConceptCentroid};
+pub use types::{
+    BufferedVector, CentroidMember, CentroidMemberWithVector, CentroidSummary, ConceptCentroid,
+};

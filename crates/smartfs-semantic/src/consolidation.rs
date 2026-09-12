@@ -3,6 +3,7 @@
 use crate::config::ConsolidationConfig;
 use crate::kmeans::{combine_centroids, kmeans2, variance_from_m2, welford_update};
 use crate::schema_family::{format_vector, parse_vector, SchemaFamily};
+use crate::supervisor::advisory_lock_key;
 use crate::types::{BufferedVector, CentroidMemberWithVector, ConceptCentroid};
 use smartfs_schema::error::{Result, SmartFsError};
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -41,7 +42,7 @@ pub async fn count_unconsolidated(db: &PgPool, plugin_type: &str, model_id: Uuid
 }
 
 /// @id: c4e19a7d-5b2f-4e88-a1c3-9f6d0b8e2a55
-/// Claims a batch of unconsolidated vectors using `FOR UPDATE SKIP LOCKED`.
+/// Claims a batch of unconsolidated vectors using `LIMIT ... FOR UPDATE SKIP LOCKED`.
 pub async fn claim_unconsolidated_batch(
     tx: &mut Transaction<'_, Postgres>,
     plugin_type: &str,
@@ -56,8 +57,8 @@ pub async fn claim_unconsolidated_batch(
         WHERE consolidated = FALSE AND is_current = TRUE
           AND plugin_type = $1 AND model_id = $2
         ORDER BY created_at ASC
-        FOR UPDATE SKIP LOCKED
         LIMIT $3
+        FOR UPDATE SKIP LOCKED
         "#
         .to_string()
     } else {
@@ -68,8 +69,8 @@ pub async fn claim_unconsolidated_batch(
             WHERE consolidated = FALSE
               AND plugin_type = $1 AND model_id = $2
             ORDER BY created_at ASC
-            FOR UPDATE SKIP LOCKED
             LIMIT $3
+            FOR UPDATE SKIP LOCKED
             "#,
             family.embedding_table()
         )
@@ -550,6 +551,19 @@ pub async fn merge_centroids(
     model_id: Uuid,
     merge_threshold: f64,
 ) -> Result<usize> {
+    // B-02: Acquire transaction-scoped advisory lock as FIRST statement in transaction
+    let lock_key = advisory_lock_key(plugin_type, model_id);
+    let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(lock_key)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| SmartFsError::Db(format!("advisory_xact_lock error in merge: {e}")))?;
+
+    if !locked {
+        tracing::debug!("advisory lock contention for merge {plugin_type}/{model_id}, skipping merge cycle");
+        return Ok(0);
+    }
+
     let family = SchemaFamily::from_model_id_tx(tx, model_id, 0).await?;
 
     let sql = format!(
@@ -734,6 +748,20 @@ pub async fn consolidate_batch(
     cfg: &ConsolidationConfig,
 ) -> Result<usize> {
     let mut tx = db.begin().await.map_err(|e| SmartFsError::Db(e.to_string()))?;
+
+    // B-02: Acquire transaction-scoped advisory lock as FIRST statement in transaction
+    let lock_key = advisory_lock_key(plugin_type, model_id);
+    let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
+        .bind(lock_key)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| SmartFsError::Db(format!("advisory_xact_lock error: {e}")))?;
+
+    if !locked {
+        tracing::debug!("advisory lock contention for {plugin_type}/{model_id}, skipping consolidation cycle");
+        return Ok(0);
+    }
+
     let batch = claim_unconsolidated_batch(&mut tx, plugin_type, model_id, cfg.batch_size).await?;
     let mut n = 0;
 
