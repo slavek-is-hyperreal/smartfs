@@ -1,0 +1,26 @@
+[package]
+name = "smartfs-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "smartfsd — the SmartFS FUSE daemon entrypoint"
+
+[[bin]]
+name = "smartfsd"
+path = "src/main.rs"
+
+[dependencies]
+smartfs-db = { workspace = true }
+smartfs-store = { workspace = true }
+smartfs-fuse = { workspace = true }
+smartfs-semantic = { workspace = true }
+clap = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+anyhow = "1"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
