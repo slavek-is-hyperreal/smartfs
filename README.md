@@ -1,0 +1,58 @@
+# SmartFS — Unified Knowledge Storage Layer
+
+**Wersja:** 6.0 — v5.0 (poprawki poprawności) + domyślny model embeddingowy Qwen + warstwa konsolidacji semantycznej (bufor roboczy → krystalizacja → graf pojęć)
+
+**Status:** Specyfikacja do implementacji. Nie zmienia niczego z v4.5/v5.0 poza tym, co wymienione w §"Delta względem v5.0" niżej — to jest przyrost, nie przepisanie.
+
+---
+
+## Jak czytać ten dokument (poziomy szczegółowości)
+
+Ta dokumentacja jest zaprojektowana do czytania stopniowego — każdy poziom linkuje w dół do bardziej szczegółowego:
+
+```
+README.md  (jesteś tu)                                    ─── poziom 0: co to jest
+  └─ docs/00-overview.md                                   ─── poziom 1: filozofia i warstwy
+       └─ docs/01-architecture.md                          ─── poziom 2: schemat systemu, ADR
+            └─ docs/02-crates.md                           ─── poziom 3: mapa crate'ów
+                 └─ docs/crates/<crate>.md                 ─── poziom 4: struktury, funkcje, invarianty per crate
+                      └─ symbol://<uuid>  (patrz docs/04)   ─── poziom 5: konkretna funkcja/struct w kodzie
+```
+
+Dwa dokumenty projektowe głębokiego nurka, bo są sercem v6.0 i nie mieszczą się w żadnym pojedynczym crate:
+
+- [`docs/03-consolidation-design.md`](docs/03-consolidation-design.md) — pełny mechanizm bufora roboczego i konsolidacji centroidów (pamięć robocza → akt scalenia → pamięć skrystalizowana)
+- [`docs/04-uuid-doc-linking.md`](docs/04-uuid-doc-linking.md) — jak każda funkcja/struct/impl dostaje trwały UUID, żeby dokumentacja przetrwała edycje linii kodu
+
+Dwa dokumenty operacyjne, dodane po pierwszym review specyfikacji:
+
+- [`docs/05-code-comments.md`](docs/05-code-comments.md) — metodyka komentowania kodu (pre-LLM, dostosowana do Rusta) — jak pisać komentarze, które przeżyją lata, nie tylko sesję, w której powstały
+- [`docs/06-agentic-execution-plan.md`](docs/06-agentic-execution-plan.md) — jak zlecić budowę tej specyfikacji narzędziu agentowemu (fazy budowy wg grafu zależności crate'ów, zasady dla subagentów, gotowy prompt)
+
+## Delta względem v5.0
+
+| Co | Zmiana | Gdzie |
+|---|---|---|
+| Domyślny model embeddingowy | `all-MiniLM-L6-v2` → `Qwen3-Embedding-0.6B` (1024d) | [ADR-49](docs/adr/ADR-49-qwen-default-model.md) |
+| Nowa rodzina embeddingów obrazowych | `png.json` i inne pliki obrazowe dostają embedding (`Qwen3-VL-Embedding-2B`) zamiast `null` | [ADR-49](docs/adr/ADR-49-qwen-default-model.md) |
+| Nowa warstwa: konsolidacja semantyczna | Bufor roboczy (świeże embeddingi) + okresowy akt scalenia w graf centroidów + graf leksykalny (słowo → centroid) | [ADR-50](docs/adr/ADR-50-working-memory-consolidation.md), [docs/03](docs/03-consolidation-design.md) |
+| Serializacja konsolidacji + merge duplikatów centroidów | Jeden supervisor per `(plugin_type, model_id)`, `pg_try_advisory_lock`, `merge_centroids` jako backstop przeciw dryfującym duplikatom | [ADR-53](docs/adr/ADR-53-consolidation-concurrency.md) |
+| Backend pełnotekstowy (BM25) | `pg_search` (Tantivy w Postgresie) zamiast gołego `tsvector` — jedyna opcja z natywnym polskim stemmingiem; nowa kolumna `file_versions.search_text`, nowe narzędzie MCP `search_fulltext` | [ADR-54](docs/adr/ADR-54-fulltext-search-backend.md), [migracja 006](migrations/006_fulltext_search.sql) |
+| Akceleracja GPU | Wyłącznie Vulkan, reuse-before-rewrite: `ggml`/`llama.cpp` budowany bez CUDA/HIP — zero CUDA, zero ROCm/HIP, z zasady; `koval.toml`: `gpu_acceleration = "vulkan" \| "cpu"` — CPU pozostaje jedynym wymogiem minimalnym | [ADR-55](docs/adr/ADR-55-gpu-acceleration.md) |
+| Nowy crate | `smartfs-semantic` — właściciel centroidów, bufora, workera konsolidacji/merge'a, grafu leksykalnego, `consolidation_thresholds` | [docs/crates/smartfs-semantic.md](docs/crates/smartfs-semantic.md) |
+| Nowy crate (dev-tool, nie wchodzi do binarki demona) | `smartfs-docgen` — ekstrakcja UUID symboli przez tree-sitter, rejestr, resolver linków | [docs/crates/smartfs-docgen.md](docs/crates/smartfs-docgen.md) |
+| Nowe migracje | `005_semantic_consolidation.sql`, `006_fulltext_search.sql` | [migrations/](migrations/) |
+| Nowe narzędzia MCP | `search_by_concept(query, plugin_type, limit)` — graf centroidów; `search_fulltext(query, plugin_type?, limit)` — BM25 | [docs/crates/smartfs-mcp.md](docs/crates/smartfs-mcp.md) |
+| Plan wykonania agentowego | Fazy budowy wg grafu zależności crate'ów zamiast podziału na weekendy; zasady dla subagentów; gotowy prompt pod Antigravity 2.0 / Gemini 3.8 Flash | [docs/06-agentic-execution-plan.md](docs/06-agentic-execution-plan.md) |
+
+Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedziczone wprost z v4.5+v5.0 bez zmian — patrz oryginalne dokumenty architektury.
+
+## Filozofia (bez zmian od v3.0)
+
+> Plik nie jest ścieżką. Plik jest swoją treścią. Hash to tożsamość.
+
+v6.0 rozszerza to o jedno zdanie:
+
+> Znaczenie nie jest pojedynczym wektorem. Znaczenie jest miejscem w grafie pojęć, do którego wektor został przypisany aktem konsolidacji.
+
+Dalej: [docs/00-overview.md](docs/00-overview.md)

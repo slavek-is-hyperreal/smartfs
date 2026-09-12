@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SmartFS symbol_registry.json — schemat",
+  "description": "Generowany przez `smartfs-docgen scan`. Nie edytować ręcznie — patrz docs/04-uuid-doc-linking.md",
+  "type": "object",
+  "properties": {
+    "generated_at": { "type": "string", "format": "date-time" },
+    "generator_version": { "type": "string" },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "crate_name", "kind", "name", "last_known_file", "last_known_line", "tombstoned"],
+        "properties": {
+          "id":               { "type": "string", "format": "uuid", "description": "Trwały identyfikator symbolu, niezależny od lokalizacji." },
+          "crate_name":       { "type": "string", "example": "smartfs-semantic" },
+          "kind":             { "type": "string", "enum": ["Function", "Struct", "Enum", "Trait", "ImplBlock"] },
+          "name":             { "type": "string", "example": "consolidation_supervisor" },
+          "last_known_file":  { "type": "string", "description": "Cache — resolve_symbol_link zawsze weryfikuje ponownym skanem." },
+          "last_known_line":  { "type": "integer" },
+          "doc_summary":      { "type": ["string", "null"] },
+          "tombstoned":       { "type": "boolean", "description": "TRUE jeśli symbol został usunięty z kodu; id nigdy nie jest reużywane." },
+          "tombstoned_reason":{ "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "example": {
+    "generated_at": "2026-09-12T12:00:00Z",
+    "generator_version": "0.1.0",
+    "symbols": [
+      {
+        "id": "6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c44",
+        "crate_name": "smartfs-semantic",
+        "kind": "Function",
+        "name": "consolidation_supervisor",
+        "last_known_file": "crates/smartfs-semantic/src/worker.rs",
+        "last_known_line": 47,
+        "doc_summary": "Pętla nadzorcy konsolidacji — dwa zegary (backlog, idle).",
+        "tombstoned": false,
+        "tombstoned_reason": null
+      }
+    ]
+  }
+}
