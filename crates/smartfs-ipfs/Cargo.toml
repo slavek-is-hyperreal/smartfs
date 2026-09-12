@@ -1,0 +1,18 @@
+[package]
+name = "smartfs-ipfs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "IpfsStore BlobStore implementation and CID computation for SmartFS"
+
+[dependencies]
+smartfs-schema.workspace = true
+smartfs-store.workspace = true
+async-trait.workspace = true
+reqwest = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+uuid.workspace = true
+tokio = { workspace = true, features = ["io-util"] }

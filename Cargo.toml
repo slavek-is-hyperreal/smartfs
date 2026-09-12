@@ -4,6 +4,7 @@ members = [
     "crates/smartfs-schema",
     "crates/smartfs-store",
     "crates/smartfs-compress",
+    "crates/smartfs-ipfs",
 ]
 
 [workspace.package]
@@ -16,6 +17,8 @@ license = "Apache-2.0"
 smartfs-schema = { path = "crates/smartfs-schema" }
 smartfs-store = { path = "crates/smartfs-store" }
 smartfs-compress = { path = "crates/smartfs-compress" }
+smartfs-ipfs = { path = "crates/smartfs-ipfs" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart"] }
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive"] }
