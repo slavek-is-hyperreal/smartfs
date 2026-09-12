@@ -1,0 +1,26 @@
+[package]
+name = "smartfs-fuse"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+smartfs-schema = { workspace = true }
+smartfs-db = { workspace = true }
+smartfs-store = { workspace = true }
+smartfs-compress = { workspace = true }
+fuser = { version = "0.15", default-features = false }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
