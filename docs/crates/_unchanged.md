@@ -2,7 +2,7 @@
 
 ← [Mapa crate'ów](../02-crates.md)
 
-Poniższe crate'y dziedziczą swoje CLAUDE.md wprost z dokumentu architektury v4.5 (sekcja 3.x) i poprawek v5.0 — nic w v6.0 ich nie dotyka:
+Poniższe crate'y dziedziczą swoje CLAUDE.md wprost z [SmartFS_Architecture_v4_5.md](../base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) (sekcja 3.x, numery §3.x przy każdym crate niżej) i z poprawek w [SmartFS_v4.5_to_v5.0_fixes.md](../base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md) — nic w v6.0 ich nie dotyka:
 
 - **smartfs-store** (§3.3) — `BlobStore` trait, `LocalDiskStore`, bez zmian. (Uwaga poza zakresem v6.0, ale warto pamiętać przy przyszłej pracy: krytyczna ocena v5.0 wskazała, że `store.exists()` z FIX-03 dodaje round-trip na gorącej ścieżce dedupu dla backendów sieciowych — nie rozwiązywane w tej wersji.)
 - **smartfs-compress** (§3.4) — pipeline hash+zstd, bez zmian.

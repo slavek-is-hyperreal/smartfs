@@ -1,6 +1,6 @@
 # smartfs-schema — delta w v6.0
 
-← [Mapa crate'ów](../02-crates.md) | Baza: CLAUDE.md z v4.5 §3.2 (bez zmian poza rozszerzeniem `SmartFsError`)
+← [Mapa crate'ów](../02-crates.md) | Baza: [SmartFS_Architecture_v4_5.md](../base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) §3.2 „smartfs-schema/CLAUDE.md" (bez zmian poza rozszerzeniem `SmartFsError`)
 
 Jedyna zmiana: `SmartFsError` (jedyny, współdzielony typ błędu wszystkich crate'ów — Root Invariant) zyskuje dwa warianty potrzebne przez `smartfs-semantic` (patrz [docs/03-consolidation-design.md](../03-consolidation-design.md) §9 i [ADR-53](../adr/ADR-53-consolidation-concurrency.md)):
 

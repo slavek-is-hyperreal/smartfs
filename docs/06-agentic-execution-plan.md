@@ -31,7 +31,7 @@ Podział z oryginalnej roadmapy (weekend 1, 2, 3...) był tempem dla człowieka.
 
 - Jeden subagent = jeden katalog `crates/<nazwa>/`. Zero współdzielonych plików z innym równoległym subagentem w tej samej fazie.
 - Maksymalna głębokość rekursji subagentów: **1** (menedżer → subagent per crate; subagent nie spawnuje dalszych subagentów). Graf zależności już daje całą potrzebną dekompozycję — głębsza rekursja to tylko ryzyko przekroczenia budżetu bez korzyści.
-- Każdy subagent dostaje **wyłącznie**: plik dokumentacji swojego crate'a (`docs/crates/<crate>.md` albo odpowiednią sekcję CLAUDE.md z v4.5 dla crate'ów "bez zmian"), Root Invariants (README + 01-architecture.md), i już scommitowany `smartfs-schema` — nic więcej, żeby nie zgadywał cudzych API.
+- Każdy subagent dostaje **wyłącznie**: plik dokumentacji swojego crate'a (`docs/crates/<crate>.md` albo odpowiednią sekcję §3.x [`docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md`](base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) dla crate'ów "bez zmian", wskazaną w [`docs/crates/_unchanged.md`](crates/_unchanged.md)), Root Invariants (README + 01-architecture.md, 8 sztuk), i już scommitowany `smartfs-schema` — nic więcej, żeby nie zgadywał cudzych API.
 - Commit po każdym ukończonym crate'cie osobno — naturalny punkt kontrolny, gdyby sesja wygasła w trakcie.
 - Komentarze w kodzie: po angielsku, zgodnie z [docs/05](05-code-comments.md). Wiadomości commitów odnoszą się do numeru ADR/invariantu/migracji, nigdy do treści tego promptu ani rozmowy, w której powstał (ta sama zasada nr 2 z docs/05, zastosowana do commit message).
 
@@ -41,10 +41,15 @@ Podział z oryginalnej roadmapy (weekend 1, 2, 3...) był tempem dla człowieka.
 Jesteś agentem kodującym pracującym w repozytorium SmartFS. Pełna specyfikacja
 leży w bieżącym katalogu roboczym. Przeczytaj w tej kolejności, zanim
 napiszesz jakikolwiek kod: README.md → docs/00-overview.md →
-docs/01-architecture.md → docs/02-crates.md → docs/03-consolidation-design.md
-→ docs/04-uuid-doc-linking.md → docs/05-code-comments.md →
-docs/06-agentic-execution-plan.md (ten plik — zawiera fazy i twarde zasady
-niżej) → migrations/*.sql w kolejności numerycznej → docs/crates/*.md.
+docs/01-architecture.md (zawiera pełny tekst wszystkich 8 Root Invariants) →
+docs/02-crates.md → docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md (pełna
+architektura bazowa v4.5, na której v6.0 jest przyrostem — cytowana przez
+docs/crates/*.md per numer §3.x) → docs/base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md
+(FIX-01..10) → docs/03-consolidation-design.md → docs/04-uuid-doc-linking.md
+→ docs/05-code-comments.md → docs/06-agentic-execution-plan.md (ten plik —
+zawiera fazy i twarde zasady niżej) → migrations/*.sql w kolejności numerycznej
+(001 do 006) → docs/crates/*.md (w tym docs/crates/_unchanged.md dla crate'ów
+bez zmian merytorycznych).
 
 Zbuduj cały workspace Cargo zgodnie z tą specyfikacją, w kolejności Faza 0 →
 Faza 6 opisanej w docs/06-agentic-execution-plan.md.
@@ -83,4 +88,4 @@ końcu jej pliku SQL, zanim przejdziesz dalej.
 
 ## Co zostaje "na weekendy" (świadomie odłożone, nie z powodu tempa)
 
-Pozycje z `SmartFS_Known_Limitations_Roadmap.md` oznaczone tam jako post-MVP (io_uring dla FUSE, seccomp sandboxing dla tree-sitter, FastCDC dla plików >RAM) zostają odłożone — ale dlatego, że są jawnie oznaczone jako hardening poza zakresem MVP, nie dlatego, że agentowi "zabrakłoby weekendu". Wszystko, co jest w zakresie v6.0 (Fazy 0-6 powyżej), idzie w jednym ciągłym przebiegu agentowym.
+Pozycje z [`docs/base-v4.5-v5.0/SmartFS_Known_Limitations_Roadmap.md`](base-v4.5-v5.0/SmartFS_Known_Limitations_Roadmap.md) oznaczone tam jako post-MVP (io_uring dla FUSE, seccomp sandboxing dla tree-sitter, FastCDC dla plików >RAM) zostają odłożone — ale dlatego, że są jawnie oznaczone jako hardening poza zakresem MVP, nie dlatego, że agentowi "zabrakłoby weekendu". Wszystko, co jest w zakresie v6.0 (Fazy 0-6 powyżej), idzie w jednym ciągłym przebiegu agentowym.

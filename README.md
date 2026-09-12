@@ -13,11 +13,18 @@ Ta dokumentacja jest zaprojektowana do czytania stopniowego — każdy poziom li
 ```
 README.md  (jesteś tu)                                    ─── poziom 0: co to jest
   └─ docs/00-overview.md                                   ─── poziom 1: filozofia i warstwy
-       └─ docs/01-architecture.md                          ─── poziom 2: schemat systemu, ADR
+       └─ docs/01-architecture.md                          ─── poziom 2: schemat systemu, ADR, 8 Root Invariants
             └─ docs/02-crates.md                           ─── poziom 3: mapa crate'ów
                  └─ docs/crates/<crate>.md                 ─── poziom 4: struktury, funkcje, invarianty per crate
                       └─ symbol://<uuid>  (patrz docs/04)   ─── poziom 5: konkretna funkcja/struct w kodzie
 ```
+
+Baza, na której v6.0 jest przyrostem (dokumenty źródłowe v4.5/v5.0, kopiowane
+dosłownie, bo `docs/crates/*.md` cytuje ich numery sekcji):
+
+- [`docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md`](docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) — pełna architektura v4.5 (Root Invariants §3.1, CLAUDE.md per crate §3.2-3.10, schemat SQL §6, AST §11, MCP §13)
+- [`docs/base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md`](docs/base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md) — FIX-01..10 (poprawki poprawności v4.5→v5.0)
+- [`docs/base-v4.5-v5.0/SmartFS_Known_Limitations_Roadmap.md`](docs/base-v4.5-v5.0/SmartFS_Known_Limitations_Roadmap.md) — znane ograniczenia i roadmapa post-MVP
 
 Dwa dokumenty projektowe głębokiego nurka, bo są sercem v6.0 i nie mieszczą się w żadnym pojedynczym crate:
 
@@ -45,7 +52,7 @@ Dwa dokumenty operacyjne, dodane po pierwszym review specyfikacji:
 | Nowe narzędzia MCP | `search_by_concept(query, plugin_type, limit)` — graf centroidów; `search_fulltext(query, plugin_type?, limit)` — BM25 | [docs/crates/smartfs-mcp.md](docs/crates/smartfs-mcp.md) |
 | Plan wykonania agentowego | Fazy budowy wg grafu zależności crate'ów zamiast podziału na weekendy; zasady dla subagentów; gotowy prompt pod Antigravity 2.0 / Gemini 3.8 Flash | [docs/06-agentic-execution-plan.md](docs/06-agentic-execution-plan.md) |
 
-Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedziczone wprost z v4.5+v5.0 bez zmian — patrz oryginalne dokumenty architektury.
+Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedziczone wprost z v4.5+v5.0 bez zmian — patrz [`docs/base-v4.5-v5.0/`](docs/base-v4.5-v5.0/) i [`docs/crates/_unchanged.md`](docs/crates/_unchanged.md).
 
 ## Filozofia (bez zmian od v3.0)
 

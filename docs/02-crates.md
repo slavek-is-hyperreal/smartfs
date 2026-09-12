@@ -17,8 +17,19 @@ smartfs/
 │   ├── smartfs-cli/        ← delta: smartfs-cli concepts (przegląd grafu centroidów)
 │   └── smartfs-docgen/     ← NOWY — dev-tool, nie wchodzi do binarki demona
 └── migrations/
-    └── 005_semantic_consolidation.sql   ← NOWA
+    ├── 001_core_schema.sql              ← baza v4.5 (z poprawką FIX-01 wtopioną w `blobs`)
+    ├── 002_embedding_models.sql         ← baza v4.5
+    ├── 003_embeddings.sql               ← baza v4.5
+    ├── 004_ast_nodes.sql                ← baza v4.5 (z poprawką FIX-02 dla `is_current`)
+    ├── 005_semantic_consolidation.sql   ← NOWA (v6.0)
+    └── 006_fulltext_search.sql          ← NOWA (v6.0, ADR-54)
 ```
+
+Migracje 001-004 to bazowy schemat v4.5, wydzielony z prozy
+[`docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md`](base-v4.5-v5.0/SmartFS_Architecture_v4_5.md)
+§6 (z poprawkami z [`SmartFS_v4.5_to_v5.0_fixes.md`](base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md)
+już wtopionymi — patrz komentarze nagłówkowe w każdym pliku migracji). One
+muszą istnieć i przejść jako pierwsze (Faza 0) — 005 i 006 zależą od nich przez FK.
 
 ## Dokumentacja per crate
 

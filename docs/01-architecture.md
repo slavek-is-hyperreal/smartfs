@@ -57,7 +57,23 @@ Pełne ADR: [docs/adr/ADR-49-qwen-default-model.md](adr/ADR-49-qwen-default-mode
 
 ## Invarianty — rozszerzenie ROOT CLAUDE.md
 
-Do pięciu invariantów z v4.5 dochodzi:
+Pięć invariantów z v4.5 (ROOT CLAUDE.md §3.1, pełny tekst także w
+[docs/base-v4.5-v5.0/SmartFS_Architecture_v4_5.md](base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) §3.1),
+zacytowane tu dosłownie, żeby wszystkie 8 invariantów żyło w jednym miejscu:
+
+```
+1. content_hash = SHA-256(oryginalne bajty PRZED kompresją) — nigdy po
+2. Każda zmiana treści tworzy nowy wiersz file_versions (CoW) — nigdy nie
+   mutuje bloba
+3. Jedyna legalna ścieżka do danych wiedzie przez daemona — ext4 to głupi
+   magazyn blobów
+4. Migracje są jawne w migrations/ — żadnego CREATE TABLE w kodzie
+   runtime
+5. Nigdy nie mieszaj wymiarów embeddingów między zapytaniami — 384 z 384,
+   1536 z 1536
+```
+
+Do nich dochodzi trójka nowa w v6.0:
 
 ```
 6. smartfs-semantic nigdy nie blokuje ani nie spowalnia cow_commit ani workera

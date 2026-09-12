@@ -1,6 +1,6 @@
 # smartfs-ai — delta w v6.0
 
-← [Mapa crate'ów](../02-crates.md) | Baza: CLAUDE.md z v4.5 §3.7 (bez zmian poza tym, co niżej)
+← [Mapa crate'ów](../02-crates.md) | Baza: [SmartFS_Architecture_v4_5.md](../base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) §3.7 „smartfs-ai/CLAUDE.md" (bez zmian poza tym, co niżej)
 
 ## Zmiany konfiguracyjne (ADR-49)
 

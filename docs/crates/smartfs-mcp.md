@@ -1,6 +1,6 @@
 # smartfs-mcp — delta w v6.0
 
-← [Mapa crate'ów](../02-crates.md) | Baza: CLAUDE.md z v4.5 §3.8 (bez zmian poza nowym narzędziem)
+← [Mapa crate'ów](../02-crates.md) | Baza: [SmartFS_Architecture_v4_5.md](../base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) §3.8 „smartfs-mcp/CLAUDE.md" (bez zmian poza nowym narzędziem)
 
 ## Nowe narzędzie
 

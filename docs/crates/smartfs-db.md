@@ -1,6 +1,6 @@
 # smartfs-db — delta w v6.0
 
-← [Mapa crate'ów](../02-crates.md) | Baza: CLAUDE.md z v4.5 §3.5 + poprawki FIX-01..04 z v5.0 (bez zmian, patrz tam)
+← [Mapa crate'ów](../02-crates.md) | Baza: [SmartFS_Architecture_v4_5.md](../base-v4.5-v5.0/SmartFS_Architecture_v4_5.md) §3.5 „smartfs-db/CLAUDE.md" + poprawki [SmartFS_v4.5_to_v5.0_fixes.md](../base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md) FIX-01..04 (bez zmian, patrz tam)
 
 Jedyna zmiana w v6.0: nowa kolumna `consolidated` na tabelach embeddingów (patrz [migracja 005](../../migrations/005_semantic_consolidation.sql)) i jedna nowa funkcja pomocnicza w publicznym API tego crate'a, wołana przez `smartfs-semantic`:
 
