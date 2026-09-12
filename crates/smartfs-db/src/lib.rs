@@ -23,7 +23,7 @@ pub use embeddings::{
 };
 pub use inodes::{
     inode_create, inode_delete, inode_get, inode_list_children, inode_lookup,
-    inode_lookup_by_ino, inode_rename, inode_update_attrs,
+    inode_lookup_by_ino, inode_rename, inode_set_index_mode, inode_update_attrs,
 };
 pub use models::{
     AstNodeInsert, AstNodeRecord, BlobInsertResult, BlobRecord, FileVersionRecord, FulltextHit,

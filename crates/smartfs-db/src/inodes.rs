@@ -234,3 +234,22 @@ pub async fn inode_rename(
 
     Ok(())
 }
+
+/// @id: d8e19f2a-7b34-4a56-89bc-0123456789ab
+/// Set an inode to index mode (versioning_enabled = FALSE, on_prem = FALSE)
+/// for external/in-place file tracking satisfying `blob_or_empty_or_virtual` check constraint.
+pub async fn inode_set_index_mode(pool: &PgPool, id: Uuid) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE inode_registry
+        SET versioning_enabled = FALSE, on_prem = FALSE, updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| SmartFsError::Db(format!("inode_set_index_mode error: {e}")))?;
+
+    Ok(())
+}

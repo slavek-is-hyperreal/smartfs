@@ -1,0 +1,27 @@
+[package]
+name = "smartfs-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Command-line interface and client library for SmartFS"
+
+[dependencies]
+smartfs-schema = { workspace = true }
+smartfs-db = { workspace = true }
+smartfs-semantic = { workspace = true }
+smartfs-store = { workspace = true }
+smartfs-compress = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
