@@ -1,0 +1,22 @@
+[package]
+name = "smartfs-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+smartfs-schema = { workspace = true }
+smartfs-db = { workspace = true }
+smartfs-semantic = { workspace = true }
+smartfs-store = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

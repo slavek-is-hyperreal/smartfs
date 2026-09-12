@@ -9,6 +9,7 @@ members = [
     "crates/smartfs-ai",
     "crates/smartfs-semantic",
     "crates/smartfs-fuse",
+    "crates/smartfs-mcp",
 ]
 
 [workspace.package]
@@ -26,6 +27,7 @@ smartfs-db = { path = "crates/smartfs-db" }
 smartfs-ai = { path = "crates/smartfs-ai" }
 smartfs-semantic = { path = "crates/smartfs-semantic" }
 smartfs-fuse = { path = "crates/smartfs-fuse" }
+smartfs-mcp = { path = "crates/smartfs-mcp" }
 fuser = "0.15"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart"] }
