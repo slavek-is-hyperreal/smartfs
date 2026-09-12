@@ -7,6 +7,7 @@
 //! and FIX-04 (store.put failure compensation).
 
 pub mod blobs;
+pub mod embeddings;
 pub mod inodes;
 pub mod models;
 pub mod search;
@@ -15,6 +16,10 @@ pub mod worker;
 
 pub use blobs::{
     compensate_blob_delete, dedup_check, get_blob, insert_blob, update_blob_compressed_size,
+};
+pub use embeddings::{
+    get_default_model_id, get_model_id_by_name, insert_ast_embedding_1536,
+    insert_embedding_1024_qwen, insert_embedding_384, insert_embedding_768,
 };
 pub use inodes::{
     inode_create, inode_delete, inode_get, inode_list_children, inode_lookup,
