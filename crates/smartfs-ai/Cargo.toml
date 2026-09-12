@@ -1,0 +1,27 @@
+[package]
+name = "smartfs-ai"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+smartfs-schema = { workspace = true }
+smartfs-db = { workspace = true }
+smartfs-store = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+zstd = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+smartfs-compress = { workspace = true }
+tempfile = "3.17"

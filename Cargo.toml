@@ -6,6 +6,7 @@ members = [
     "crates/smartfs-compress",
     "crates/smartfs-ipfs",
     "crates/smartfs-db",
+    "crates/smartfs-ai",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ smartfs-store = { path = "crates/smartfs-store" }
 smartfs-compress = { path = "crates/smartfs-compress" }
 smartfs-ipfs = { path = "crates/smartfs-ipfs" }
 smartfs-db = { path = "crates/smartfs-db" }
+smartfs-ai = { path = "crates/smartfs-ai" }
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart"] }
 thiserror = "1.0"
