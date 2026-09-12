@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/smartfs-schema",
+    "crates/smartfs-store",
 ]
 
 [workspace.package]
@@ -12,6 +13,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 smartfs-schema = { path = "crates/smartfs-schema" }
+smartfs-store = { path = "crates/smartfs-store" }
 thiserror = "1.0"
 uuid = { version = "1", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive"] }

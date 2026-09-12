@@ -1,0 +1,16 @@
+[package]
+name = "smartfs-store"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "BlobStore trait and local storage backends for SmartFS"
+
+[dependencies]
+smartfs-schema.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
