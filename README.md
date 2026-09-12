@@ -52,6 +52,7 @@ Dwa dokumenty operacyjne, dodane po pierwszym review specyfikacji:
 | Nowe narzędzia MCP | `search_by_concept(query, plugin_type, limit)` — graf centroidów; `search_fulltext(query, plugin_type?, limit)` — BM25 | [docs/crates/smartfs-mcp.md](docs/crates/smartfs-mcp.md) |
 | Plan wykonania agentowego | Fazy budowy wg grafu zależności crate'ów zamiast podziału na weekendy; zasady dla subagentów; gotowy prompt pod Antigravity 2.0 / Gemini 3.8 Flash | [docs/06-agentic-execution-plan.md](docs/06-agentic-execution-plan.md) |
 | Ciągłość agenta (post-MVP, poza Fazami 0-6) | `special_data.agent` (`actor_id`/`task_id`) na `file_versions` + MCP `get_actor_activity` — agent, który stracił kontekst, sam odpytuje "co już zrobiłem", zamiast wymagać relacji od człowieka | [ADR-56](docs/adr/ADR-56-agent-continuity.md) |
+| Słownik pluginów jako dane (post-MVP, poza Fazami 0-6) | `describe_plugin_type`/`list_plugin_types` przez MCP — agent odkrywa kształt `special_data` tym samym kanałem co dane, zamiast czytać `plugins/*.json` poza SmartFS (inspiracja Pick/MultiValue) | [ADR-57](docs/adr/ADR-57-pick-style-plugin-dictionary.md) |
 
 Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedziczone wprost z v4.5+v5.0 bez zmian — patrz [`docs/base-v4.5-v5.0/`](docs/base-v4.5-v5.0/) i [`docs/crates/_unchanged.md`](docs/crates/_unchanged.md).
 
@@ -62,5 +63,9 @@ Wszystko inne (FUSE, CoW, dedup przez `blobs`, AST, IPFS, uprawnienia) dziedzicz
 v6.0 rozszerza to o jedno zdanie:
 
 > Znaczenie nie jest pojedynczym wektorem. Znaczenie jest miejscem w grafie pojęć, do którego wektor został przypisany aktem konsolidacji.
+
+## Wizja daleka (nie część v6.0 — nie wymagane czytanie przed budową)
+
+[`docs/vision/north-star-kernel-native.md`](docs/vision/north-star-kernel-native.md) — notatka robocza, nie ADR: SmartFS jako natywny system plików jądra (nie FUSE), docelowo główny root własnej dystrybucji. Zawiera stan faktyczny Rust-w-jądrze (wrzesień 2026), rozwiązanie problemu bootstrapu roota (`switch_root`/early userspace) i sekwencjonowanie bootu jako grafu zależności (systemd). Świadomie odłożone do czasu, aż Fazy 0-6 będą działać — nic stąd nie wchodzi do promptu dla Antigravity.
 
 Dalej: [docs/00-overview.md](docs/00-overview.md)
