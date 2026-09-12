@@ -16,6 +16,8 @@ members = [
 ]
 
 [workspace.package]
+# Crates version independently: scripts/build.sh bumps the patch of every
+# crate whose content changed. This value is only the seed for a new crate.
 version = "0.1.0"
 edition = "2021"
 authors = ["SmartFS Authors"]

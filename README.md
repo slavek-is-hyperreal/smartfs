@@ -80,6 +80,31 @@ Pełna lista z uzasadnieniami: [docs/01-architecture.md §Invarianty](docs/01-ar
 7. Centroid nie jest nigdy przeliczany globalnie w locie — tylko lokalnie, przy akcie konsolidacji
 8. Każdy publiczny symbol Rust w `crates/` ma dokładnie jeden `@id` (UUID v4), nadany raz i nigdy nie zmieniany
 
+## Budowanie i wersjonowanie
+
+Buduj przez wrapper, nie przez gołe `cargo`:
+
+```
+scripts/build.sh                                      # cargo build --workspace
+scripts/build.sh clippy --workspace --all-targets -- -D warnings
+scripts/build.sh test --workspace
+scripts/build.sh --no-bump build --workspace          # weryfikacja bez bumpa (CI)
+```
+
+Każdy crate ma własną wersję w swoim `Cargo.toml` (nie `version.workspace = true`).
+`scripts/build.sh` woła `scripts/version_bump.py`, który liczy hash treści każdego
+crate'a (`src/`, `tests/`, `benches/`, `examples/`, `build.rs` oraz `Cargo.toml` z
+pominięciem samej linii `version`) i podbija patch wersji **każdego crate'a, którego
+treść zmieniła się od ostatniego zapisanego builda**. Stan trzyma
+`.build-versions.json` w korzeniu repo.
+
+Skutek: rekompilacja po zmianie kodu zawsze daje nowy numer wersji dla zmienionego
+crate'a — i tylko dla niego. `smartfsd --version` pokazuje wersję binarki.
+
+Bump musi być przed cargo, nie w `build.rs`: cargo czyta `Cargo.toml` zanim
+uruchomi jakikolwiek `build.rs`, więc bump w trakcie builda działałby dopiero
+na następnym.
+
 ## Wizja daleka (nie część v6.0 — nie wymagane czytanie przed budową)
 
 [`docs/vision/north-star-kernel-native.md`](docs/vision/north-star-kernel-native.md) — notatka robocza, nie ADR: SmartFS jako natywny system plików jądra (nie FUSE), docelowo główny root własnej dystrybucji. Zawiera stan faktyczny Rust-w-jądrze (wrzesień 2026), rozwiązanie problemu bootstrapu roota (`switch_root`/early userspace) i sekwencjonowanie bootu jako grafu zależności (systemd). Świadomie odłożone do czasu, aż Fazy 0-6 będą działać — nic stąd nie wchodzi do promptu dla Antigravity.
