@@ -275,6 +275,26 @@ mcp_call() {
   printf '%s\n' "$out" | jq -c 'select(.id == 2)' 2>/dev/null | tail -n1
 }
 
+# mcp_hit_count <response-json> -> number of search hits, or -1 if unparseable.
+#
+# The hits arrive as a JSON *string* inside .result.content[0].text, not as
+# parsed objects. Counting parsed objects instead (the original implementation)
+# counted the JSON-RPC envelope, which carries an "id" field — so it returned 1
+# for an empty result set and 1 for a five-hit set alike, and the
+# "B-04 CONFIRMED" branch below could never be reached. A probe that cannot
+# produce its own failing verdict is exactly the defect section 0 forbids.
+mcp_hit_count() {
+  jq -r '
+    (.result.content[0].text // "") as $t
+    | if ($t | length) == 0 then 0
+      else (($t | fromjson?) // null) as $parsed
+           | if $parsed == null then -1
+             elif ($parsed | type) == "array" then ($parsed | length)
+             else 1
+             end
+      end' <<<"$1" 2>/dev/null || echo -1
+}
+
 # Give the embedding worker a chance to process the files just written.
 info "     waiting for the smartfs-ai worker to drain the pending queue"
 WAITED=0
@@ -318,10 +338,9 @@ else
   printf '%s\n' "$CONTROL_RESP" > "${RES}/b04-control-response.json"
 
   CONTROL_ERR="$(jq -r 'if .error then "yes" else "no" end' <<<"$CONTROL_RESP" 2>/dev/null || echo parse-error)"
-  CONTROL_N="$(jq -r '[.. | objects | select(has("content_hash") or has("path") or has("id"))] | length' \
-                 <<<"$CONTROL_RESP" 2>/dev/null || echo 0)"
+  CONTROL_N="$(mcp_hit_count "$CONTROL_RESP")"
   CONTROL_TEXTLEN="$(jq -r '(.result.content[0].text // "") | length' <<<"$CONTROL_RESP" 2>/dev/null || echo 0)"
-  log "control: error=${CONTROL_ERR} result_objects=${CONTROL_N} text_len=${CONTROL_TEXTLEN}"
+  log "control: error=${CONTROL_ERR} hits=${CONTROL_N} text_len=${CONTROL_TEXTLEN}"
 
   # --- SUBJECT: pass plain text as query, no query_vector. ---
   SUBJECT_RESP="$(mcp_call search_semantic \
@@ -329,11 +348,14 @@ else
   printf '%s\n' "$SUBJECT_RESP" > "${RES}/b04-subject-response.json"
 
   SUBJECT_ERR="$(jq -r 'if .error then "yes" else "no" end' <<<"$SUBJECT_RESP" 2>/dev/null || echo parse-error)"
-  SUBJECT_N="$(jq -r '[.. | objects | select(has("content_hash") or has("path") or has("id"))] | length' \
-                 <<<"$SUBJECT_RESP" 2>/dev/null || echo 0)"
-  log "subject: error=${SUBJECT_ERR} result_objects=${SUBJECT_N}"
+  SUBJECT_N="$(mcp_hit_count "$SUBJECT_RESP")"
+  log "subject: error=${SUBJECT_ERR} hits=${SUBJECT_N}"
 
-  if [[ "$CONTROL_ERR" == "yes" ]] || (( CONTROL_N == 0 && CONTROL_TEXTLEN < 3 )); then
+  if (( CONTROL_N == -1 || SUBJECT_N == -1 )); then
+    fail "B-04 probe INCONCLUSIVE-FAIL: a response payload could not be parsed as JSON,
+          so hits cannot be counted and no verdict is possible. This is a FAILURE, not a
+          pass. See ${RES}/b04-control-response.json and ${RES}/b04-subject-response.json"
+  elif [[ "$CONTROL_ERR" == "yes" ]] || (( CONTROL_N == 0 && CONTROL_TEXTLEN < 3 )); then
     fail "B-04 probe INCONCLUSIVE-FAIL: the CONTROL call (explicit query_vector) returned
           no results or an error. A vector is always its own nearest neighbour, so this
           means the search path itself is broken or the index is unpopulated. Nothing can
@@ -365,8 +387,7 @@ else
   BYCON="$(mcp_call search_by_concept '{"query":"brown fox","limit":5}')"
   printf '%s\n' "$BYCON" > "${RES}/b04-search-by-concept.json"
   BYCON_ERR="$(jq -r 'if .error then "yes" else "no" end' <<<"$BYCON" 2>/dev/null || echo parse-error)"
-  BYCON_N="$(jq -r '[.. | objects | select(has("content_hash") or has("path") or has("id"))] | length' \
-               <<<"$BYCON" 2>/dev/null || echo 0)"
+  BYCON_N="$(mcp_hit_count "$BYCON")"
   if [[ "$BYCON_ERR" == "no" ]] && (( BYCON_N == 0 )); then
     fail "B-04 CONFIRMED for search_by_concept: plain-text query returned an empty list with
           no error. See ${RES}/b04-search-by-concept.json"

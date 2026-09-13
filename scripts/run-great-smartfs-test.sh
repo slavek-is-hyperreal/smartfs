@@ -16,7 +16,9 @@
 #
 #   --skip-apt            do not install the xfstests build dependencies
 #   --with-xfstests-run   also run ./check-smartfs -g generic (HOURS; off by default)
-#   --stages "0 1 2"      run only these stages (default: 0 1 2 3 4)
+#   --stages "0 1 2"      run only these stages (default: 0 1 2 3 4 5)
+#                         stage 5 is perf DIAGNOSTICS: it records numbers and
+#                         never fails on a slow one
 #
 # Environment passthrough: STOCHASTIC_ROUNDS (default 25, the plan's figure)
 # lowers or raises Stage 4's random-kill loop. Anything below 25 is reduced
@@ -43,7 +45,7 @@ CALLER_HOME="$(getent passwd "$CALLER" | cut -d: -f6)"
 
 INSTALL_APT=1
 RUN_XFSTESTS=0
-STAGES="0 1 2 3 4"
+STAGES="0 1 2 3 4 5"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-apt)          INSTALL_APT=0; shift ;;
@@ -91,6 +93,14 @@ export SMARTFS_STORE_PATH="${SMARTFS_BACKING_MOUNT}/blobs"
 export SMARTFS_DB_URL="${SMARTFS_DB_URL:-postgres://postgres:postgres@172.17.0.2:5432/smartfs}"
 export RESULTS_ROOT="${REPO}/test-results"
 export PG_CONTAINER="${PG_CONTAINER:-smartfs-test-db}"
+
+# Stage 4 mounts here and, when a killed hammer writer outlives the unmount,
+# leaks real files into the underlying directory. Left at its default of
+# /mnt/smartfs-crash that lands on the root filesystem, which has a few GB
+# free. Everything the test writes belongs on the test partition.
+export CRASH_MOUNT="${CRASH_MOUNT:-${SMARTFS_BACKING_MOUNT}/mnt-crash}"
+export TEST_MNT="${TEST_MNT:-${SMARTFS_BACKING_MOUNT}/mnt-xfs-test}"
+export SCRATCH_MNT_DIR="${SCRATCH_MNT_DIR:-${SMARTFS_BACKING_MOUNT}/mnt-xfs-scratch}"
 export STOCHASTIC_ROUNDS="${STOCHASTIC_ROUNDS:-25}"
 
 # Incidental storage on the pool, never on the test partition.
@@ -113,7 +123,8 @@ info "daemon logs     ${XFS_LOG_DIR}            (pool)"
 info "cargo           $(command -v cargo || echo 'NOT FOUND')"
 command -v cargo >/dev/null || { bad "cargo not on PATH even after adding ${CARGO_HOME}/bin"; exit 1; }
 
-mkdir -p "$TMPDIR" "$XFS_LOG_DIR" "$RESULTS_ROOT" "$SMARTFS_STORE_PATH" "$SMARTFS_MOUNT" /mnt/smartfs-crash
+mkdir -p "$TMPDIR" "$XFS_LOG_DIR" "$RESULTS_ROOT" "$SMARTFS_STORE_PATH" "$SMARTFS_MOUNT" \
+         "$CRASH_MOUNT" "$TEST_MNT" "$SCRATCH_MNT_DIR"
 chmod 1777 "$TMPDIR"
 
 # xfstests' check-smartfs wrapper hardcodes /var/log/smartfs-xfs-*.log, and /
@@ -127,9 +138,17 @@ info "redirected /var/log/smartfs-xfs-*.log onto the pool (root fs has $(df -h /
 # ── clean slate ────────────────────────────────────────────────────────────
 say "clearing leftovers from any previous run"
 pkill -x smartfsd 2>/dev/null && { info "killed a stray smartfsd"; sleep 2; } || true
-for mp in "$SMARTFS_MOUNT" /mnt/smartfs-crash /mnt/smartfs-xfs-test /mnt/smartfs-xfs-scratch; do
+for mp in "$SMARTFS_MOUNT" "$CRASH_MOUNT" "$TEST_MNT" "$SCRATCH_MNT_DIR" \
+          /mnt/smartfs-crash /mnt/smartfs-xfs-test /mnt/smartfs-xfs-scratch; do
   fusermount -u -z "$mp" 2>/dev/null || umount -l "$mp" 2>/dev/null || true
 done
+for mp in "$CRASH_MOUNT" /mnt/smartfs-crash; do
+  if [[ -d "$mp" ]] && ! mountpoint -q "$mp" 2>/dev/null && [[ -n "$(ls -A "$mp" 2>/dev/null)" ]]; then
+    warn "clearing $(ls -A "$mp" | wc -l) stray file(s) left in ${mp} by a previous crash round"
+    find "$mp" -mindepth 1 -delete 2>/dev/null || true
+  fi
+done
+
 if [[ -n "$(ls -A "$SMARTFS_MOUNT" 2>/dev/null)" ]]; then
   bad "${SMARTFS_MOUNT} is not empty and is not a mountpoint. Inspect it by hand; refusing to delete."
   ls -la "$SMARTFS_MOUNT" >&2
@@ -154,6 +173,39 @@ if [[ " $STAGES " == *" 3 "* && $INSTALL_APT -eq 1 ]]; then
       || warn "apt install reported an error; Stage 3 may fail on missing deps"
   fi
 fi
+
+# ── harness integrity ──────────────────────────────────────────────────────
+# The suite grades the system under test; nothing grades the suite. So its
+# digest is recorded on every run and compared against the committed value.
+#
+# This matters most for an unattended fix-and-rerun loop: widening
+# pjdfstest-expected-failures.txt or softening an assertion is always cheaper
+# than fixing rename(), and §7.3 says a script changed to make a stage pass is
+# itself the finding. A changed harness does not stop the run — sometimes the
+# harness genuinely needs fixing — but it is impossible to change quietly.
+say "harness integrity"
+HARNESS_MANIFEST="${REPO}/scripts/testing/HARNESS.sha256"
+HARNESS_NOW="$(cd "$REPO" && find scripts/testing -type f \( -name '*.sh' -o -name '*.sql' -o -name '*expected-failures*' \) \
+                 ! -name 'HARNESS.sha256' -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+HARNESS_STATUS="unrecorded"
+if [[ -f "$HARNESS_MANIFEST" ]]; then
+  HARNESS_WAS="$(awk '{print $1}' "$HARNESS_MANIFEST")"
+  if [[ "$HARNESS_WAS" == "$HARNESS_NOW" ]]; then
+    HARNESS_STATUS="unchanged"
+    info "test harness matches the committed digest (${HARNESS_NOW:0:16}…)"
+  else
+    HARNESS_STATUS="CHANGED"
+    warn "TEST HARNESS CHANGED since the recorded digest."
+    warn "  recorded ${HARNESS_WAS:0:16}…   now ${HARNESS_NOW:0:16}…"
+    warn "  Per §7.3 this modification is itself a finding and must be reported"
+    warn "  BEFORE any result from this run is quoted. Files changed vs git HEAD:"
+    (cd "$REPO" && git diff --stat HEAD -- scripts/testing | sed 's/^/      /') || true
+  fi
+else
+  info "no recorded digest yet; adopting ${HARNESS_NOW:0:16}…"
+fi
+printf '%s  scripts/testing\n' "$HARNESS_NOW" > "$HARNESS_MANIFEST"
+chown "$CALLER:$CALLER" "$HARNESS_MANIFEST" 2>/dev/null || true
 
 # ── pre-build as the caller, so root's cargo run is a no-op ────────────────
 say "pre-build as ${CALLER} (keeps root from writing into target/)"
@@ -199,6 +251,7 @@ run_stage 1 01_smoke_test.sh                  "smoke test (B-04 probe)"
 run_stage 2 02_run_pjdfstest.sh               "pjdfstest (POSIX semantics)"
 run_stage 3 03_setup_check_smartfs_xfstests.sh "xfstests scaffold"
 run_stage 4 04_crash_consistency_test.sh      "crash consistency"
+run_stage 5 05_perf_diagnostics.sh            "perf diagnostics (record-only)"
 
 # ── optional: the multi-hour generic/ run ──────────────────────────────────
 if (( RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
@@ -224,11 +277,13 @@ MANIFEST="${RESULTS_ROOT}/RUN-MANIFEST.txt"
   echo "free on sda3       : $(df -h "$SMARTFS_BACKING_MOUNT" | awk 'NR==2{print $4}')"
   echo "free on /          : $(df -h / | awk 'NR==2{print $4}')"
   echo "PG_CONTAINER       : ${PG_CONTAINER}  (K12 enabled)"
+  echo "crash mount        : ${CRASH_MOUNT}"
+  echo "harness digest     : ${HARNESS_NOW}  (${HARNESS_STATUS})"
   echo "STOCHASTIC_ROUNDS  : ${STOCHASTIC_ROUNDS}$( (( STOCHASTIC_ROUNDS < 25 )) && echo '   *** BELOW the plan figure of 25 — REDUCED COVERAGE ***')"
   echo "crash instrumentation: $("${REPO}/target/debug/smartfsd" --crash-points >/dev/null 2>&1 && echo 'present' || echo 'ABSENT (Stage 0b not implemented; Stage 4 stochastic-only by design)')"
   echo
   echo "stage exit codes (0 = pass, anything else = FAIL):"
-  for k in 0 1 2 3 4 3g; do
+  for k in 0 1 2 3 4 5 3g; do
     [[ -v EXIT_CODE[$k] ]] && printf '  stage %-3s : %s\n' "$k" "${EXIT_CODE[$k]}"
   done
   echo
@@ -250,7 +305,7 @@ info "done"
 
 say "SUMMARY"
 FAILED=0
-for k in 0 1 2 3 4 3g; do
+for k in 0 1 2 3 4 5 3g; do
   if [[ -v EXIT_CODE[$k] ]]; then
     if (( ${EXIT_CODE[$k]} == 0 )); then
       printf '%s  stage %-3s PASS%s\n' "$C_GRN" "$k" "$C_OFF"

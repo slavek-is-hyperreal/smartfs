@@ -104,6 +104,22 @@ reset_scratch() {
   done
   fusermount -u -z "$CRASH_MOUNT" 2>/dev/null || umount -l "$CRASH_MOUNT" 2>/dev/null || true
   rm -rf "${CRASH_STORE:?}"; mkdir -p "$CRASH_STORE" "$CRASH_MOUNT"
+  clear_crash_mountpoint
+}
+
+# A hammer writer that outlives the unmount reopens its path and lands a REAL
+# file in the underlying directory. The next start_daemon then refuses to mount
+# over a non-empty directory (exit 2) and the whole stage aborts mid-round. The
+# daemon is right to refuse; the debris is the harness's to clear, and only ever
+# while the path is not a mount, so this can never delete anything the
+# filesystem under test is serving.
+clear_crash_mountpoint() {
+  mountpoint -q "$CRASH_MOUNT" 2>/dev/null && return 0
+  if [[ -n "$(ls -A "$CRASH_MOUNT" 2>/dev/null)" ]]; then
+    log "clearing $(ls -A "$CRASH_MOUNT" | wc -l) stray file(s) left in ${CRASH_MOUNT} by killed writers"
+    find "$CRASH_MOUNT" -mindepth 1 -delete 2>/dev/null || true
+  fi
+  return 0
 }
 
 # Snapshot every blob file's digest. Invariant #2 says content-addressed blobs
@@ -447,7 +463,11 @@ for r in $(seq 1 "$STOCHASTIC_ROUNDS"); do
   kill -9 "$DAEMON_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   DAEMON_PID=""
-  mountpoint -q "$CRASH_MOUNT" && fusermount -u "$CRASH_MOUNT" 2>/dev/null || true
+  # Lazy, like everywhere else: a killed FUSE daemon leaves an endpoint that a
+  # plain fusermount -u refuses to detach.
+  mountpoint -q "$CRASH_MOUNT" 2>/dev/null \
+    && { fusermount -u -z "$CRASH_MOUNT" 2>/dev/null || umount -l "$CRASH_MOUNT" 2>/dev/null || true; }
+  clear_crash_mountpoint
 
   start_daemon "$CRASH_MOUNT" "$CRASH_STORE" "$CRASH_URL"
   snapshot_blobs "${RD}/blobs-after.sha256"

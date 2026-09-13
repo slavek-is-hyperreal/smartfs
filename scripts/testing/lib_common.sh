@@ -196,8 +196,16 @@ quiesce_queue() {
     sleep 0.05
     waited=$((waited + 1))
   done
-  log "warning: pending queue did not quiesce within 5s"
-  return 1
+  # A queue that will not drain is a real failure of the system under test, not
+  # a timing inconvenience. Returning non-zero here used to trip the caller's
+  # `set -e` and abort the stage with no [FAIL] line and no explanation, which
+  # turned a meaningful result into an unexplained exit. Record it and let the
+  # stage carry on to its summary.
+  fail "pending queue did not quiesce within 5s at ${q}
+          $(ls -1 "$q" 2>/dev/null | head -3 | sed 's/^/            /')
+          The drain is stuck or too slow; SQL assertions after this point are
+          reading a database that is behind the filesystem."
+  return 0
 }
 
 require_live_mount() {
