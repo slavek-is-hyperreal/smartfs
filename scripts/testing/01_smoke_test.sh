@@ -76,6 +76,7 @@ info "1.3  Root Invariant #2 — every content change creates a new file_version
 
 printf '%s' "second revision of the file" > "$F1"; sync
 printf '%s' "third revision of the file"  > "$F1"; sync
+quiesce_queue "$SMARTFS_STORE_PATH"
 
 VER_COUNT="$(psql_q "SELECT count(*) FROM file_versions WHERE inode_id = '${INODE1}'")"
 [[ "$VER_COUNT" == "3" ]] \
@@ -100,8 +101,10 @@ info "1.4  dedup — identical content must not create a second blobs row"
 DUP_CONTENT="identical content for dedup check $$"
 DUP_HASH="$(printf '%s' "$DUP_CONTENT" | sha256sum | awk '{print $1}')"
 printf '%s' "$DUP_CONTENT" > "${WORK}/dup-a.txt"; sync
+quiesce_queue "$SMARTFS_STORE_PATH"
 BLOBS_BEFORE="$(psql_q "SELECT count(*) FROM blobs")"
 printf '%s' "$DUP_CONTENT" > "${WORK}/dup-b.txt"; sync
+quiesce_queue "$SMARTFS_STORE_PATH"
 BLOBS_AFTER="$(psql_q "SELECT count(*) FROM blobs")"
 
 [[ "$BLOBS_BEFORE" == "$BLOBS_AFTER" ]] \
@@ -153,6 +156,7 @@ fi
 info "1.6  truncate-to-zero"
 
 : > "$F1"; sync
+quiesce_queue "$SMARTFS_STORE_PATH"
 TRUNC_SIZE="$(stat -c %s "$F1")"
 [[ "$TRUNC_SIZE" == "0" ]] \
   && pass "truncate-to-zero reports size 0" \
@@ -216,6 +220,7 @@ fi
 
 # ── 1.8 Root Invariant #3: nothing visible without a file_versions row ──────
 info "1.8  Root Invariant #3 — every visible file traces to a file_versions row"
+quiesce_queue "$SMARTFS_STORE_PATH"
 
 I3_FAILURES=0
 while IFS= read -r -d '' f; do

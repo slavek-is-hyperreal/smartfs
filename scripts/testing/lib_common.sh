@@ -9,6 +9,7 @@
 # See docs/testing/the-great-smartfs-test.md
 
 set -euo pipefail
+export LC_ALL=C
 
 # ── Configuration (override via environment) ────────────────────────────────
 SMARTFS_REPO="${SMARTFS_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -174,9 +175,24 @@ stop_daemon() {
   wait "$DAEMON_PID" 2>/dev/null || true
   DAEMON_PID=""
   [[ -n "$DAEMON_READY_FILE" ]] && rm -f "$DAEMON_READY_FILE"
-  # AutoUnmount should handle this; be certain anyway.
-  mountpoint -q "$SMARTFS_MOUNT" 2>/dev/null && fusermount -u "$SMARTFS_MOUNT" 2>/dev/null || true
+  # AutoUnmount should handle this; be certain anyway (lazy unmount clears broken endpoints).
+  fusermount -u -z "$SMARTFS_MOUNT" 2>/dev/null || umount -l "$SMARTFS_MOUNT" 2>/dev/null || true
   return 0
+}
+
+quiesce_queue() {
+  local store="${1:-$SMARTFS_STORE_PATH}"
+  local q="${store}/pending/queue"
+  local waited=0
+  while (( waited < 100 )); do
+    if [[ ! -d "$q" ]] || [[ -z "$(ls -A "$q" 2>/dev/null)" ]]; then
+      return 0
+    fi
+    sleep 0.05
+    waited=$((waited + 1))
+  done
+  log "warning: pending queue did not quiesce within 5s"
+  return 1
 }
 
 require_live_mount() {

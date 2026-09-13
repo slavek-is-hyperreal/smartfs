@@ -7,12 +7,12 @@
 -- ─────────────────────────────────────────────────────────────────
 
 -- ── 1. Domyślny model Qwen (ADR-49) ─────────────────────────────────
+UPDATE embedding_models SET is_default = FALSE WHERE name = 'all-MiniLM-L6-v2';
+
 INSERT INTO embedding_models (name, dimensions, version, is_local, is_default) VALUES
     ('Qwen3-Embedding-0.6B',     1024, '1.0', TRUE, TRUE),   -- nowy domyślny
     ('Qwen3-Embedding-4B',       2560, '1.0', TRUE, FALSE),  -- opt-in "accurate", zajmuje slot BGE-M3
     ('Qwen3-VL-Embedding-2B',    1024, '1.0', TRUE, FALSE);  -- opt-in, obrazy
-
-UPDATE embedding_models SET is_default = FALSE WHERE name = 'all-MiniLM-L6-v2';
 
 -- ── 2. plugin_type DENORMALIZOWANY na każdej tabeli embeddingów ─────
 -- POWÓD (zamknięcie luki z review): ani ast_embeddings_1536, ani

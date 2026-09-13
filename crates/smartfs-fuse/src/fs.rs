@@ -745,6 +745,32 @@ impl Filesystem for SmartFsFuse {
         reply.ok();
     }
 
+    fn fsync(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _fh: u64,
+        _datasync: bool,
+        reply: ReplyEmpty,
+    ) {
+        let pending = self.pending.clone();
+        let _ = self.block_on(async move {
+            pending.quiesce(Duration::from_secs(5)).await
+        });
+        reply.ok();
+    }
+
+    fn link(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _newparent: u64,
+        _newname: &OsStr,
+        reply: ReplyEntry,
+    ) {
+        reply.error(libc::ENOTSUP);
+    }
+
     fn rename(
         &mut self,
         _req: &Request<'_>,

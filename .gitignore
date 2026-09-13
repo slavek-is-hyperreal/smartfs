@@ -2,3 +2,5 @@
 Cargo.lock
 .antigravity/
 *.gguf
+test-results/
+third_party/
