@@ -52,7 +52,8 @@ INSTALL_APT=1
 RUN_XFSTESTS=0
 WATCH=0
 WATCH_TIMEOUT="${WATCH_TIMEOUT:-43200}"   # 12h of idling, then root is released
-STAGES="0 1 2 3 4 5"
+ALL_STAGES="0 1 2 3 4 5"
+STAGES="$ALL_STAGES"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-apt)          INSTALL_APT=0; shift ;;
@@ -297,6 +298,16 @@ do_run() {
     return 1
   }
 
+  # Pin the commit under test at the moment stage 0 builds it. Recording
+  # `git rev-parse HEAD` when the manifest is written attributes results to
+  # whatever was committed while the run was in flight — which is exactly what
+  # happened to iteration 3, whose numbers came from 971aab1 but were filed
+  # under 4c5432b. A measurement credited to the wrong commit is worse than no
+  # measurement.
+  BUILT_COMMIT="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  BUILT_DIRTY="$(git -C "$REPO" status --porcelain 2>/dev/null | wc -l)"
+  info "building and testing commit ${BUILT_COMMIT} (${BUILT_DIRTY} file(s) dirty)"
+
   run_stage 0 00_preflight_checks.sh "preflight"
   if [[ " $STAGES " == *" 0 "* && "${EXIT_CODE[0]}" -ne 0 ]]; then
     say "STOPPED"
@@ -333,8 +344,9 @@ do_run() {
     echo "finished           : $(date -Is)"
     echo "host               : $(uname -srm)  $(hostname)"
     echo "invoked by         : ${CALLER}"
-    echo "repo commit        : $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    echo "repo dirty         : $(git -C "$REPO" status --porcelain 2>/dev/null | wc -l) file(s)"
+    echo "repo commit        : ${BUILT_COMMIT:-unknown}   (commit that was BUILT for this iteration)"
+  echo "HEAD at write time : $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "repo dirty at build : ${BUILT_DIRTY:-unknown} file(s)"
     echo "smartfsd version   : $("${REPO}/target/debug/smartfsd" --version 2>/dev/null || echo 'not built')"
     echo "backing device     : ${SMARTFS_BACKING_DEV} (label ${EXPECT_LABEL})"
     echo "free on sda3       : $(df -h "$SMARTFS_BACKING_MOUNT" | awk 'NR==2{print $4}')"
@@ -419,7 +431,8 @@ set_status() {
 await_trigger() {
   local waited=0
   say "WAITING — iteration ${ITERATION} finished, holding root and idling"
-  info "re-run :  touch ${TRIGGER}"
+  info "re-run :  touch ${TRIGGER}            (all stages)"
+  info "         echo '0 5' > ${TRIGGER}   (only these stages)"
   info "stop   :  touch ${STOPFILE}"
   info "status :  ${STATUS}"
   info "budget :  ${WATCH_TIMEOUT}s of idling before this exits on its own"
@@ -432,8 +445,19 @@ await_trigger() {
       return 1
     fi
     if [[ -e "$TRIGGER" ]]; then
+      # The file may name a stage subset, e.g. `echo "0 5" > run`. Validated
+      # against a digit whitelist and never executed: the contents select from
+      # the committed suite, they are not a command. Empty means all stages.
+      local requested
+      requested="$(tr -cd '0-9 ' < "$TRIGGER" | tr -s ' ' | sed 's/^ *//;s/ *$//')"
       rm -f "$TRIGGER"
-      say "trigger seen — starting iteration $(( ITERATION + 1 ))"
+      if [[ -n "$requested" ]]; then
+        STAGES="$requested"
+        say "trigger seen — iteration $(( ITERATION + 1 )), stages: ${STAGES}"
+      else
+        STAGES="$ALL_STAGES"
+        say "trigger seen — starting iteration $(( ITERATION + 1 ))"
+      fi
       return 0
     fi
     sleep 2

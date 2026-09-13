@@ -699,7 +699,14 @@ impl Filesystem for SmartFsFuse {
             // one slice. Reading a 64 MB file in 128 KB chunks therefore
             // decompressed 64 MB roughly five hundred times, which the first
             // perf run measured as 1.16 MB/s.
-            if let Err(e) = state.ensure_buffer(fh, || self.load_current_bytes(ino)) {
+            let load = (|| -> Result<()> {
+                if state.needs_buffer(fh)? {
+                    let data = self.load_current_bytes(ino)?;
+                    state.set_buffer_if_absent(fh, data)?;
+                }
+                Ok(())
+            })();
+            if let Err(e) = load {
                 reply.error(error_to_errno(&e));
                 return;
             }
@@ -743,8 +750,14 @@ impl Filesystem for SmartFsFuse {
     ) {
         let state = self.state.clone();
 
-        // Ensure buffer initialized from store before mutating
-        let init_res = state.ensure_buffer(fh, || self.load_current_bytes(ino));
+        // Load outside the handles lock, then publish — see needs_buffer().
+        let init_res = (|| -> Result<()> {
+            if state.needs_buffer(fh)? {
+                let data = self.load_current_bytes(ino)?;
+                state.set_buffer_if_absent(fh, data)?;
+            }
+            Ok(())
+        })();
 
         if let Err(e) = init_res {
             reply.error(error_to_errno(&e));

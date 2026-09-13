@@ -204,20 +204,42 @@ impl FuseStateManager {
     }
 
     /// @id: 3ae1f2a3-b4c5-4d6e-7f80-91a2b3c4d5e6
-    /// Ensure the buffer is loaded for `fh`, invoking `loader` if currently uninitialized.
-    pub fn ensure_buffer<F>(&self, fh: u64, loader: F) -> Result<()>
-    where
-        F: FnOnce() -> Result<Vec<u8>>,
-    {
+    /// Reports whether `fh` still needs its buffer loaded.
+    ///
+    /// Split from the loading itself on purpose. This used to be an
+    /// `ensure_buffer(fh, loader)` that took the handles write lock and then
+    /// called the loader **while still holding it** — and the loader does
+    /// database and blob-store I/O. One global lock over every open handle,
+    /// held across disk I/O, serialises the whole filesystem behind whichever
+    /// request is currently loading. It was survivable while only `write` used
+    /// it and became a problem the moment `read` did too.
+    ///
+    /// Callers now check, load outside the lock, then publish with
+    /// [`FuseStateManager::set_buffer_if_absent`].
+    pub fn needs_buffer(&self, fh: u64) -> Result<bool> {
+        let handles = self.handles.read().expect("handles lock poisoned");
+        match handles.get(&fh) {
+            Some(h) => Ok(h.buffer.is_none()),
+            None => Err(SmartFsError::NotFound(format!("File handle {fh} not found"))),
+        }
+    }
+
+    /// @id: 6f1d84b0-2c37-4ae9-9b05-1d7e3af02c96
+    /// Publishes a freshly loaded buffer, unless one arrived meanwhile.
+    ///
+    /// Two readers racing may both load; that is harmless, because they load
+    /// the same bytes and the first to publish wins. Paying for that rare
+    /// duplicate is much cheaper than holding a global lock through I/O.
+    pub fn set_buffer_if_absent(&self, fh: u64, data: Vec<u8>) -> Result<()> {
         let mut handles = self.handles.write().expect("handles lock poisoned");
-        if let Some(h) = handles.get_mut(&fh) {
-            if h.buffer.is_none() {
-                let data = loader()?;
-                h.buffer = Some(data);
+        match handles.get_mut(&fh) {
+            Some(h) => {
+                if h.buffer.is_none() {
+                    h.buffer = Some(data);
+                }
+                Ok(())
             }
-            Ok(())
-        } else {
-            Err(SmartFsError::NotFound(format!("File handle {fh} not found")))
+            None => Err(SmartFsError::NotFound(format!("File handle {fh} not found"))),
         }
     }
 
@@ -487,9 +509,11 @@ mod tests {
         assert_eq!(manager.open_fd_count(inode_id), 1);
 
         // Ensure buffer initialized
+        assert!(manager.needs_buffer(fh).unwrap());
         manager
-            .ensure_buffer(fh, || Ok(b"initial content".to_vec()))
+            .set_buffer_if_absent(fh, b"initial content".to_vec())
             .unwrap();
+        assert!(!manager.needs_buffer(fh).unwrap());
         let h = manager.get_handle(fh).unwrap();
         assert_eq!(h.buffer.unwrap(), b"initial content");
 
@@ -659,5 +683,44 @@ mod file_type_tests {
     fn non_device_types_report_no_device_number() {
         let attr = inode_to_file_attr(&rec(libc::S_IFIFO | 0o644, false, 0));
         assert_eq!(attr.rdev, 0);
+    }
+}
+
+#[cfg(test)]
+mod buffer_locking_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn a_second_publish_does_not_clobber_the_first() {
+        // Two readers may race to load the same file. They load identical bytes,
+        // so the loser's result is simply dropped — which is what makes it safe
+        // to load outside the lock instead of holding it through I/O.
+        let m = FuseStateManager::new();
+        let fh = m.allocate_fh(1, Uuid::new_v4(), 0, None);
+
+        m.set_buffer_if_absent(fh, b"first".to_vec()).unwrap();
+        m.set_buffer_if_absent(fh, b"second".to_vec()).unwrap();
+
+        assert_eq!(m.get_handle(fh).unwrap().buffer.unwrap(), b"first");
+    }
+
+    #[test]
+    fn needs_buffer_reports_missing_handles_rather_than_lying() {
+        let m = FuseStateManager::new();
+        assert!(m.needs_buffer(999).is_err());
+        assert!(m.set_buffer_if_absent(999, Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_loaded_buffer_is_not_reloaded() {
+        let m = FuseStateManager::new();
+        let fh = m.allocate_fh(1, Uuid::new_v4(), 0, None);
+        assert!(m.needs_buffer(fh).unwrap());
+        m.set_buffer_if_absent(fh, b"x".to_vec()).unwrap();
+        assert!(
+            !m.needs_buffer(fh).unwrap(),
+            "a second read must not trigger another load of the whole file"
+        );
     }
 }
