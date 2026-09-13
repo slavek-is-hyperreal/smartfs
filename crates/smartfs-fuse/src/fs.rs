@@ -362,7 +362,7 @@ impl Filesystem for SmartFsFuse {
                         size: new_size as i64,
                         compressed_size,
                         external_path: None,
-                        mode: mode.map(|m| (m & 0o7777) as u32).unwrap_or(record.mode as u32),
+                        mode: mode.map(|m| m & 0o7777).unwrap_or(record.mode as u32),
                         uid: uid.unwrap_or(record.uid as u32),
                         gid: gid.unwrap_or(record.gid as u32),
                         special_type: Some("generic".to_string()),
@@ -553,7 +553,7 @@ impl Filesystem for SmartFsFuse {
                     Some(Vec::new()),
                 );
                 let attr = inode_to_file_attr(&created);
-                reply.created(&TTL, &attr, 1, fh, flags as u32);
+                reply.created(&TTL, &attr, 1, fh, 0);
             }
             Err(e) => reply.error(error_to_errno(&e)),
         }
@@ -579,7 +579,7 @@ impl Filesystem for SmartFsFuse {
         match res {
             Ok(record) => {
                 let fh = self.state.allocate_fh(ino, record.id, flags, None);
-                reply.opened(fh, flags as u32);
+                reply.opened(fh, 0);
             }
             Err(e) => reply.error(error_to_errno(&e)),
         }

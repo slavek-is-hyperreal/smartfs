@@ -318,6 +318,11 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         .gate(exit::MOUNT_FAILED)?;
     tracing::info!(fstype = %fstype, "mount is live and serving");
 
+    // ADR-58: Ensure any replayed crash markers finish committing before advertising readiness.
+    if !pipeline.quiesce(std::time::Duration::from_secs(5)).await {
+        tracing::warn!("quiesce after startup replay timed out after 5s");
+    }
+
     let pid = std::process::id();
     if let Some(path) = args.pid_file.as_deref() {
         write_atomic(path, &format!("{pid}\n"))
