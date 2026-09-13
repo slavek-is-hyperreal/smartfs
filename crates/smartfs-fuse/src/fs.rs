@@ -80,6 +80,42 @@ impl SmartFsFuse {
         &self.pending
     }
 
+    /// @id: 9e4a1c73-05bd-42f6-b8e1-7c30a5d92b48
+    /// Loads a file's current bytes: the newest uncommitted write if one is
+    /// queued, otherwise what `inode_registry` points at.
+    ///
+    /// Shared by `read` and `write` so the two cannot disagree about what a
+    /// file currently contains. The overlay lookup is the same one `read` and
+    /// `getattr` use (ADR-58 point 7); before this existed, `write`'s own
+    /// loader consulted only the database and could therefore seed its buffer
+    /// from the *previous* version of a file whose newer write had been
+    /// acknowledged but not yet drained — silently reverting it on the next
+    /// flush.
+    fn load_current_bytes(&self, ino: u64) -> Result<Vec<u8>> {
+        let pool = self.pool.clone();
+        let store = self.store.clone();
+        let pending = self.pending.clone();
+
+        self.block_on(async move {
+            let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
+                .await?
+                .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
+
+            let blob = match pending.view_of(record.id) {
+                Some(view) => view.blob_id,
+                None => record.current_blob_id,
+            };
+
+            match blob {
+                Some(blob_id) => {
+                    let compressed = store.get(blob_id, None).await?;
+                    Ok(smartfs_compress::decompress(&compressed).unwrap_or(compressed))
+                }
+                None => Ok(Vec::new()),
+            }
+        })
+    }
+
     /// @id: 7825d6e7-f809-41ab-b2c3-d4e5f6071829
     /// Returns a reference to the shared `FuseStateManager`.
     pub fn state(&self) -> &Arc<FuseStateManager> {
@@ -603,8 +639,6 @@ impl Filesystem for SmartFsFuse {
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        let pool = self.pool.clone();
-        let store = self.store.clone();
         let state = self.state.clone();
 
         // 1. Read from per-fd buffer if modified/present
@@ -618,37 +652,29 @@ impl Filesystem for SmartFsFuse {
         let data = if let Some(buf) = buffer_data {
             buf
         } else {
-            // 2. Otherwise read from store
-            let pending = self.pending.clone();
-            let res: Result<Vec<u8>> = self.block_on(async move {
-                let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
-                    .await?
-                    .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
-
-                // ADR-58: a write acknowledged but not yet committed is not in
-                // inode_registry yet. Without this the mount would serve the
-                // previous version back to the process that just wrote it.
-                let blob = match pending.view_of(record.id) {
-                    Some(view) => view.blob_id,
-                    None => record.current_blob_id,
-                };
-
-                if let Some(blob_id) = blob {
-                    let compressed = store.get(blob_id, None).await?;
-                    let decompressed =
-                        smartfs_compress::decompress(&compressed).unwrap_or(compressed);
-                    Ok(decompressed)
-                } else {
-                    Ok(Vec::new())
-                }
-            });
-
-            match res {
-                Ok(loaded) => loaded,
-                Err(e) => {
-                    reply.error(error_to_errno(&e));
-                    return;
-                }
+            // 2. Otherwise load once into this handle's buffer.
+            //
+            // ADR-16 always specified a per-fd RAM buffer holding the whole
+            // file; read simply never populated it, so every read() re-fetched
+            // the blob from the store and decompressed all of it just to return
+            // one slice. Reading a 64 MB file in 128 KB chunks therefore
+            // decompressed 64 MB roughly five hundred times, which the first
+            // perf run measured as 1.16 MB/s.
+            if let Err(e) = state.ensure_buffer(fh, || self.load_current_bytes(ino)) {
+                reply.error(error_to_errno(&e));
+                return;
+            }
+            match self.state.get_handle(fh).and_then(|h| h.buffer) {
+                Some(buf) => buf,
+                // No handle: fall back to a direct load rather than failing a
+                // read the caller is entitled to.
+                None => match self.load_current_bytes(ino) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        reply.error(error_to_errno(&e));
+                        return;
+                    }
+                },
             }
         };
 
@@ -673,27 +699,10 @@ impl Filesystem for SmartFsFuse {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        let pool = self.pool.clone();
-        let store = self.store.clone();
         let state = self.state.clone();
 
         // Ensure buffer initialized from store before mutating
-        let init_res = state.ensure_buffer(fh, || {
-            self.block_on(async move {
-                let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
-                    .await?
-                    .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
-
-                if let Some(blob_id) = record.current_blob_id {
-                    let compressed = store.get(blob_id, None).await?;
-                    let decompressed =
-                        smartfs_compress::decompress(&compressed).unwrap_or(compressed);
-                    Ok(decompressed)
-                } else {
-                    Ok(Vec::new())
-                }
-            })
-        });
+        let init_res = state.ensure_buffer(fh, || self.load_current_bytes(ino));
 
         if let Err(e) = init_res {
             reply.error(error_to_errno(&e));

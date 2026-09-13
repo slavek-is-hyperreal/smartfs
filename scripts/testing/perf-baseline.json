@@ -1,0 +1,16 @@
+{
+  "recorded_at": "2026-09-13T17:08:06+02:00",
+  "commit": "46cc28d",
+  "samples": 200,
+  "close_latency_p99_ms": 15.78758,
+  "close_latency_mean_ms": 8.246611555,
+  "mkdir_per_sec": 35.9,
+  "close_latency_p95_ms": 10.835881,
+  "write_compressible_mbps": 80.96,
+  "close_latency_p50_ms": 7.49355,
+  "stat_per_sec": 459.3,
+  "read_incompressible_mbps": 1.16,
+  "write_incompressible_mbps": 9.98,
+  "queue_drained_fully": 1,
+  "queue_drain_ms": 3.6
+}
