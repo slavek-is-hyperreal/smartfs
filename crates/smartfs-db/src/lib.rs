@@ -16,7 +16,8 @@ pub mod versions;
 pub mod worker;
 
 pub use blobs::{
-    compensate_blob_delete, dedup_check, get_blob, insert_blob, update_blob_compressed_size,
+    compensate_blob_delete, dedup_check, get_blob, insert_blob, list_blob_digests,
+    update_blob_compressed_size,
 };
 pub use embeddings::{
     get_default_model_id, get_model_dimensions, get_model_id_by_name, insert_ast_embedding_1536,

@@ -4,10 +4,12 @@
 
 pub mod local;
 pub mod pending;
+pub mod scrub;
 pub mod traits;
 
 pub use local::LocalDiskStore;
 pub use pending::PendingQueue;
+pub use scrub::{scrub_once, ScrubActual, ScrubFinding, ScrubPacing, ScrubReport, ScrubScope};
 pub use traits::BlobStore;
 
 #[cfg(test)]

@@ -104,3 +104,35 @@ pub async fn get_blob(pool: &PgPool, content_hash: &str) -> Result<Option<BlobRe
     .await
     .map_err(|e| SmartFsError::Db(format!("get_blob error: {e}")))
 }
+
+/// @id: d5db3387-d800-449b-a3b3-e8b7fe24dd82
+/// Lists `(blob_id, content_hash)` pairs for the ADR-58 checksum scrub.
+///
+/// `sample` picks a random subset so a periodic pass covers the store over
+/// time without ever reading all of it at once; `None` returns everything, for
+/// a deliberate full run at low load. Randomization lives here, in the query,
+/// so the scrub itself stays deterministic over whatever it is handed.
+///
+/// External-path versions are excluded: their bytes are not in the blob store,
+/// so the scrub has nothing to verify them against.
+pub async fn list_blob_digests(
+    pool: &PgPool,
+    sample: Option<i64>,
+) -> Result<Vec<(Uuid, String)>> {
+    let rows = match sample {
+        Some(limit) => {
+            sqlx::query_as::<_, (Uuid, String)>(
+                "SELECT blob_id, content_hash FROM blobs ORDER BY random() LIMIT $1",
+            )
+            .bind(limit)
+            .fetch_all(pool)
+            .await
+        }
+        None => {
+            sqlx::query_as::<_, (Uuid, String)>("SELECT blob_id, content_hash FROM blobs")
+                .fetch_all(pool)
+                .await
+        }
+    };
+    rows.map_err(|e| SmartFsError::Db(format!("list_blob_digests error: {e}")))
+}

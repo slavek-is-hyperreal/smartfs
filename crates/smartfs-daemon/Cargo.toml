@@ -1,6 +1,6 @@
 [package]
 name = "smartfs-daemon"
-version = "0.1.4"
+version = "0.1.5"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 smartfs-db = { workspace = true }
 smartfs-store = { workspace = true }
+smartfs-compress = { workspace = true }
 smartfs-fuse = { workspace = true }
 smartfs-semantic = { workspace = true }
 clap = { workspace = true }

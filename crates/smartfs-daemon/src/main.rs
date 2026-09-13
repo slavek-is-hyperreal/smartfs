@@ -35,6 +35,14 @@ const MOUNT_READY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Exceeding it is safe: unfinished markers are durable and replay on restart.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Gap between checksum scrub passes (ADR-58 decision point 7). Deliberately
+/// long: this hunts bit rot, which is slow, and must never crowd out live I/O.
+const SCRUB_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Blobs verified per scrub pass. A sample, so one pass is bounded however
+/// large the store grows; successive passes cover it over time.
+const SCRUB_SAMPLE: i64 = 512;
+
 /// Crash-point labels compiled into this binary (§1.5).
 ///
 /// Stage 0b — the `crash_point!` macro behind `smartfs-db`'s non-default
@@ -256,6 +264,52 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         }
     };
 
+    // Checksum scrub (ADR-58 decision point 7). Distinct from the pending
+    // scan in every way that matters: that one looks for a database row
+    // missing for a file that exists, this one for a file gone bad under a row
+    // that exists. Its logs say "scrub" so the two can never be confused.
+    let scrub_pool = pool.clone();
+    let scrub_root = store_path.clone();
+    let scrub_task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(SCRUB_INTERVAL).await;
+            match smartfs_db::list_blob_digests(&scrub_pool, Some(SCRUB_SAMPLE)).await {
+                Ok(expectations) if expectations.is_empty() => {}
+                Ok(expectations) => {
+                    let report = smartfs_store::scrub_once(
+                        &scrub_root,
+                        &expectations,
+                        smartfs_store::ScrubScope::Full,
+                        smartfs_store::ScrubPacing::default(),
+                        |bytes| {
+                            smartfs_compress::decompress(bytes)
+                                .map(|plain| smartfs_compress::hash_bytes(&plain).0)
+                                .map_err(|e| e.to_string())
+                        },
+                    )
+                    .await;
+                    match report {
+                        Ok(r) if r.is_clean() => tracing::info!("{}", r.summary()),
+                        Ok(r) => {
+                            tracing::error!("{}", r.summary());
+                            for f in &r.findings {
+                                tracing::error!(
+                                    blob = %f.blob_id,
+                                    expected = %f.expected,
+                                    "scrub found a damaged blob at {}: {:?}",
+                                    f.path.display(),
+                                    f.actual
+                                );
+                            }
+                        }
+                        Err(e) => tracing::error!("scrub pass failed: {e}"),
+                    }
+                }
+                Err(e) => tracing::error!("scrub could not read blob digests: {e}"),
+            }
+        }
+    });
+
     // ── Step 10. prove the mount is serving, then publish readiness ─────────
     let fstype = wait_until_serving(&mountpoint, MOUNT_READY_TIMEOUT)
         .await
@@ -305,6 +359,7 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         _ = sigterm.recv() => tracing::info!("SIGTERM received, shutting down"),
     }
 
+    scrub_task.abort();
     for handle in &supervisors {
         handle.abort();
     }
