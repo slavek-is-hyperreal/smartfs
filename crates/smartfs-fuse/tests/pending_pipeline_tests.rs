@@ -292,3 +292,100 @@ async fn a_full_queue_refuses_with_pending_queue_full() {
          with PendingQueueFull rather than growing without bound"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn a_restart_replays_markers_left_by_a_dead_daemon() {
+    // Decision point 4: the startup scan is what makes the pending stage a real
+    // durability boundary. Simulated by writing markers straight into the queue
+    // directory — exactly what a daemon killed between rename() and drain
+    // leaves behind — and then starting a pipeline over it.
+    let pool = pool().await;
+    let store = TempDir::new().unwrap();
+    let inode_id = make_inode(&pool).await;
+
+    let queue = smartfs_store::PendingQueue::new(store.path());
+    let bodies = ["orphan one", "orphan two"];
+    for (i, body) in bodies.iter().enumerate() {
+        let m = marker(i as u64 + 1, inode_id, body);
+        queue.enqueue(&m).await.expect("enqueue failed");
+    }
+    assert_eq!(queue.depth().await.unwrap(), 2);
+    assert!(
+        versions_of(&pool, inode_id).await.is_empty(),
+        "precondition: nothing committed yet"
+    );
+
+    // A fresh daemon comes up over the same store.
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        store.path(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits::from_env(),
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    let rows = await_versions(&pool, inode_id, 2).await;
+    assert_eq!(
+        rows.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        vec![1, 2],
+        "replayed markers must land in seq order, contiguously"
+    );
+    assert_eq!(
+        queue.depth().await.unwrap(),
+        0,
+        "replay must checkpoint every marker it commits"
+    );
+
+    // The sequence counter must resume above what was on disk, or a new write
+    // would sort before the recovered ones and break FIFO across the restart.
+    assert!(
+        pipeline.next_seq() > 2,
+        "seq must resume above the highest marker found on disk"
+    );
+
+    cleanup(&pool, inode_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn rescan_does_not_requeue_what_is_already_in_flight() {
+    // Guards the failure mode that makes a periodic scan dangerous: with a
+    // stalled drain, re-sending every marker on every pass turns a bounded disk
+    // backlog into an unbounded memory one.
+    let pool = pool().await;
+    let store = TempDir::new().unwrap();
+
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        store.path(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits {
+            max_entries: 64,
+            block_timeout: Duration::from_millis(200),
+        },
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    // An orphan inode means every commit fails, so markers stay queued.
+    let orphan = Uuid::new_v4();
+    for i in 0..4 {
+        let m = marker(pipeline.next_seq(), orphan, &format!("stuck {i}"));
+        let _ = pipeline.submit(&m).await;
+    }
+    // Let the drain fail each one and drop it from the in-flight set.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let first = pipeline.rescan().await.expect("rescan failed");
+    assert!(first > 0, "a failed commit must be visible to the next scan");
+
+    // Immediately again: everything is in flight, so nothing may be re-sent.
+    let second = pipeline.rescan().await.expect("rescan failed");
+    assert_eq!(
+        second, 0,
+        "a marker already handed to the drain must not be requeued by the very \
+         next scan"
+    );
+}

@@ -21,9 +21,10 @@
 //! been acknowledged — reserving later would mean refusing a write we had
 //! already promised to keep.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use smartfs_db::PgPool;
@@ -31,6 +32,16 @@ use smartfs_schema::error::{Result, SmartFsError};
 use smartfs_schema::PendingMarker;
 use smartfs_store::PendingQueue;
 use tokio::sync::{mpsc, Notify};
+
+/// Reads the periodic scan interval, once.
+fn scan_interval_from_env() -> Duration {
+    std::env::var("SMARTFS_PENDING_SCAN_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_SCAN_INTERVAL)
+}
 
 /// Fraction of total system RAM budgeted for the queue (decision point 5:
 /// a fraction of *total* memory, fixed at startup, never of momentary free
@@ -52,6 +63,9 @@ const MIN_ENTRIES: usize = 1_024;
 
 /// Default for §Rozstrzygnięcia #1.
 const DEFAULT_BLOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often the background scan of decision point 4 re-reads `pending/queue/`.
+const DEFAULT_SCAN_INTERVAL: Duration = Duration::from_secs(60);
 
 /// @id: 751a6ca3-4434-40db-9b2f-0299d017bcb5
 /// Startup-computed bounds for the pending pipeline.
@@ -202,6 +216,12 @@ pub struct PendingPipeline {
     tx: mpsc::UnboundedSender<String>,
     seq: Arc<AtomicU64>,
     gate: Arc<Gate>,
+    /// Markers handed to the drain and not yet finished with.
+    ///
+    /// Without this the periodic scan would re-send every queued marker on
+    /// every pass, and a stalled drain would grow the channel without bound —
+    /// trading a bounded disk backlog for an unbounded memory one.
+    inflight: Arc<Mutex<HashSet<String>>>,
     limits: PendingLimits,
 }
 
@@ -231,33 +251,67 @@ impl PendingPipeline {
             .unwrap_or(0);
 
         // Seed the gate from what is already queued, so restarting into a
-        // backlog does not hand writers a fresh full allowance.
+        // backlog does not hand writers a fresh full allowance. Seeding above
+        // the maximum is intentional and correct: writes stay refused until the
+        // backlog drains back under the limit.
         let backlog = queued.len();
-        let gate = Arc::new(Gate::new(limits.max_entries, backlog.min(limits.max_entries)));
+        let gate = Arc::new(Gate::new(limits.max_entries, backlog));
 
         // Unbounded: capacity is governed by the gate, which only frees a slot
         // once a marker is actually checkpointed.
         let (tx, rx) = mpsc::unbounded_channel::<String>();
 
+        let inflight = Arc::new(Mutex::new(HashSet::new()));
+
         let drain_queue = queue.clone();
         let drain_gate = Arc::clone(&gate);
-        rt.spawn(async move { drain_loop(pool, drain_queue, drain_gate, rx).await });
+        let drain_inflight = Arc::clone(&inflight);
+        rt.spawn(async move {
+            drain_loop(pool, drain_queue, drain_gate, drain_inflight, rx).await
+        });
 
-        tracing::info!(
-            max_entries = limits.max_entries,
-            block_timeout_ms = limits.block_timeout.as_millis() as u64,
-            resume_seq_above = highest,
-            backlog,
-            "pending pipeline started"
-        );
-
-        Ok(Self {
+        let pipeline = Self {
             queue,
             tx,
             seq: Arc::new(AtomicU64::new(highest + 1)),
             gate,
+            inflight,
             limits,
-        })
+        };
+
+        // Decision point 4, first half: the startup scan is mandatory, and it
+        // runs before this function returns so the daemon cannot declare
+        // readiness while a backlog sits unqueued.
+        let replayed = pipeline.rescan().await?;
+
+        // Second half: keep rescanning, so a marker whose commit failed is
+        // retried rather than waiting for the next restart.
+        let scan_pipeline = pipeline.clone();
+        let interval = scan_interval_from_env();
+        rt.spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                match scan_pipeline.rescan().await {
+                    Ok(n) if n > 0 => {
+                        tracing::warn!(requeued = n, "periodic scan found uncommitted markers")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::error!("periodic pending scan failed: {e}"),
+                }
+            }
+        });
+
+        tracing::info!(
+            max_entries = limits.max_entries,
+            block_timeout_ms = limits.block_timeout.as_millis() as u64,
+            scan_interval_s = interval.as_secs(),
+            resume_seq_above = highest,
+            backlog,
+            replayed,
+            "pending pipeline started"
+        );
+
+        Ok(pipeline)
     }
 
     /// @id: 6607534f-7f9e-4438-b4c7-5875ce4b7797
@@ -313,7 +367,9 @@ impl PendingPipeline {
             return Err(e);
         }
 
-        if self.tx.send(file_name).is_err() {
+        self.mark_inflight(file_name.clone());
+        if self.tx.send(file_name.clone()).is_err() {
+            self.clear_inflight(&file_name);
             // The drain is gone. The marker is durable and the periodic scan
             // will still find it, so this is not data loss — but the caller
             // must not be told the pipeline is healthy.
@@ -323,6 +379,52 @@ impl PendingPipeline {
             ));
         }
         Ok(())
+    }
+
+    /// @id: 20b4f9c7-8e51-4a36-bd02-7f1c6a8e35d9
+    /// Decision point 4: rescans `pending/queue/` and hands the drain anything
+    /// it is not already working on. Returns how many markers were requeued.
+    ///
+    /// Called once at startup and on a timer afterwards, and exposed so an
+    /// operator can force a recovery pass straight after an incident instead of
+    /// waiting for the next tick.
+    ///
+    /// The scan never commits anything itself. All commits stay in the single
+    /// drain task, which is what keeps decision point 3's "one sequential
+    /// consumer" true — and with it the property that `version_number`,
+    /// computed per transaction, follows write order.
+    pub async fn rescan(&self) -> Result<usize> {
+        let mut requeued = 0usize;
+        for name in self.queue.list().await? {
+            if !self.mark_inflight(name.clone()) {
+                continue; // already handed to the drain
+            }
+            if self.tx.send(name.clone()).is_err() {
+                self.clear_inflight(&name);
+                return Err(SmartFsError::Store(
+                    "pending drain is not running; cannot replay the queue".to_string(),
+                ));
+            }
+            requeued += 1;
+        }
+        Ok(requeued)
+    }
+
+    /// Records a marker as handed to the drain. Returns false if it already was.
+    fn mark_inflight(&self, name: String) -> bool {
+        match self.inflight.lock() {
+            Ok(mut set) => set.insert(name),
+            // A poisoned lock would mean the drain panicked mid-update. Send
+            // anyway: a duplicate costs one no-op commit, a dropped marker
+            // costs an uncommitted write.
+            Err(_) => true,
+        }
+    }
+
+    fn clear_inflight(&self, name: &str) {
+        if let Ok(mut set) = self.inflight.lock() {
+            set.remove(name);
+        }
     }
 
     /// @id: 4477e438-ea1a-437b-9d3a-607abd142c72
@@ -353,10 +455,19 @@ async fn drain_loop(
     pool: PgPool,
     queue: PendingQueue,
     gate: Arc<Gate>,
+    inflight: Arc<Mutex<HashSet<String>>>,
     mut rx: mpsc::UnboundedReceiver<String>,
 ) {
     while let Some(file_name) = rx.recv().await {
-        match commit_one(&pool, &queue, &file_name).await {
+        let outcome = commit_one(&pool, &queue, &file_name).await;
+
+        // Clear before acting on the result: a marker whose commit failed must
+        // become visible to the next scan, or it would never be retried.
+        if let Ok(mut set) = inflight.lock() {
+            set.remove(&file_name);
+        }
+
+        match outcome {
             // Checkpointed: the slot is genuinely free again.
             Ok(Some(_)) => gate.release(),
             // Someone else already checkpointed it and freed its slot.
