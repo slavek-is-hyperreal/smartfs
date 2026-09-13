@@ -3,6 +3,13 @@
 **Status:** executable plan, not yet executed. Nothing in this document may be marked done on the
 basis of a report; only on the basis of a script exit code and its artifacts under `test-results/`.
 
+**Amended 2026-09-13 for [ADR-58](../adr/ADR-58-two-stage-cow-commit.md).** Stage 0 is built
+(`crates/smartfs-daemon`, binary `smartfsd`), and ADR-58 then split `cow_commit` into a durable
+pending stage plus a background drain. That rewrites the exact code path §2.2 and §5.2 measure, so
+both were revised — see the marked blocks. Every revision is recorded as a revision, with what it
+used to assert and why it no longer can; none of them weakens a check to make a stage pass, and
+§7.3's rule that a script modified to make a stage pass is itself the finding still stands.
+
 **Target:** SmartFS v6.0 (FUSE), Postgres 16 + pgvector, content-addressed blob store on ext4.
 
 **Audience:** the project owner, or an autonomous coding agent (Gemini / Antigravity) with shell
@@ -65,6 +72,20 @@ subsequent stage — pjdfstest, xfstests, crash consistency — needs exactly th
 Stage 0 is not optional and cannot be reordered. It is also the one stage that is implementation
 work rather than testing work; it is specified here because the test plan is blocked on it, not
 because the test plan owns it.
+
+> **DONE 2026-09-13.** `crates/smartfs-daemon` exists and produces `smartfsd`, per §1.2-1.4. Exit
+> codes 2-7 were each forced against a live gate rather than read off the source. §1.5 (Stage 0b,
+> crash-point instrumentation) is deliberately NOT implemented, so `--crash-points` prints nothing
+> and exits 1 and Stage 4 refuses deterministic mode — the loud behaviour §1.5 asks for.
+>
+> **A second gap of the same kind, not catalogued above:** `smartfs-mcp` is *also* a library crate
+> with no `main.rs` and no `[[bin]]` — `src/` is `handler.rs, lib.rs, protocol.rs, server.rs,
+> tokens.rs, tools.rs, types.rs`. §2.1's B-04 probe shells out to `target/debug/smartfs-mcp`, which
+> therefore cannot exist, and `01_smoke_test.sh` treats its absence as a hard `die`. Stage 1 will
+> stop there with "smartfs-mcp binary not found" **before** it can reach a B-04 verdict, so the
+> outcome is *unreachable*, not *confirmed*. `McpServer::run_stdio()` already exists in `server.rs`,
+> so closing it is a thin `main.rs` — but it is implementation work outside §1 and is recorded here
+> rather than done silently.
 
 ### 1.2 What to build
 
@@ -207,20 +228,48 @@ the surprising result requiring explanation.
 
 ### 2.2 The rest of Stage 1
 
+> **Revised 2026-09-13 for ADR-58.** `cow_commit` is now two-staged: `release()` returns once the
+> blob and a pending marker are durable, and a background drain writes `file_versions` afterwards.
+> That splits the checks below into two kinds, and conflating them is how this stage would either
+> flake or go falsely green:
+>
+> - **Checks that must hold immediately, with no waiting at all.** Read-back, `stat` size, and
+>   anything else observable through the mount. ADR-58 point 7's read overlay exists precisely so
+>   these keep holding across the uncommitted window; a `sleep` before them would *hide* the very
+>   regression they are there to catch. If read-back needs a wait, that is a FAIL, not a timing
+>   problem to tune away.
+> - **Checks that read SQL.** These must first wait for the queue to quiesce — poll
+>   `smartfs-cli status` until `Uncommitted markers: 0`, or poll `<store>/pending/queue/` until it
+>   is empty, with a hard timeout that FAILs on expiry. Never a fixed `sleep`: a fixed sleep is a
+>   guess that turns into a flake, and a flake in this suite is indistinguishable from the bug.
+>
+> Nothing below was weakened. The version-count and hash assertions are unchanged; only the moment
+> at which SQL may be read moved, because the moment the row appears moved.
+
 Against the mount at `/mnt/smartfs-test`:
 
-- create / write / read-back / `stat` a small file; assert bytes round-trip exactly
-- overwrite it twice, then assert via SQL that `file_versions` has **three** rows for that inode
-  with `version_number` 1,2,3 and three distinct `content_hash` values (Root Invariant #2)
+- create / write / read-back / `stat` a small file; assert bytes round-trip exactly — **immediately,
+  with no quiesce first.** This is now also the read-after-write check for ADR-58's overlay
+- overwrite it twice, then **wait for quiesce** and assert via SQL that `file_versions` has **three**
+  rows for that inode with `version_number` 1,2,3 and three distinct `content_hash` values
+  (Root Invariant #2). Contiguous `1,2,3` is still the right assertion: ADR-58 allocates
+  `version_number` inside the drain transaction, not at marker time, exactly so numbering stays
+  gap-free (ADR-58 §Rozstrzygnięcia #3, rewizja)
+- assert that between the write and the quiesce the file **still reads as the new content** — the
+  window in which the database is behind must not be observable through the mount
 - assert each `content_hash` equals the SHA-256 of the *original* bytes, computed independently in
   the shell (Root Invariant #1) — never trust a hash the daemon reports about itself
 - `rename()` within a directory and across directories; `unlink()`; `mkdir`/`rmdir`; a hardlink if
   supported, an explicit documented `ENOTSUP` if not
-- write a file whose content is byte-identical to an existing one and assert the `blobs` table gains
-  **no** new row while `file_versions` gains one (dedup, Invariant #2)
+- write a file whose content is byte-identical to an existing one and assert (after quiesce) that the
+  `blobs` table gains **no** new row while `file_versions` gains one (dedup, Invariant #2)
+- with the daemon stopped mid-backlog: kill it while markers are queued, restart, and assert every
+  acknowledged write reaches `file_versions` without a duplicate. This is the property the pending
+  stage exists for, and Stage 1 is where it is cheapest to check
 - write through `smartfs-cli write`, read through the FUSE mount, and vice versa; both must be
   visible to the other, with the same `content_hash`
-- `smartfs-cli history` / `status` must agree with the SQL
+- `smartfs-cli history` / `status` must agree with the SQL, and `status` must report
+  `Uncommitted markers: 0` once quiesced
 - a truncate-to-zero (`> file`) must not corrupt the version chain
 
 ---
@@ -313,6 +362,28 @@ invariants) and changes the *boundary*: crash the daemon at every meaningful poi
 Derived from the canonical `cow_commit` in `SmartFS_v4.5_to_v5.0_fixes.md` (FIX-04's merged
 pseudocode, which supersedes §11.1 KROK 1 and §12.1), plus FIX-02's worker boundary:
 
+> **Revised 2026-09-13 for ADR-58.** The list below was derived from a `cow_commit` that ran KROK 1
+> and KROK 2 back to back inside `release()`. ADR-58 moved KROK 2 into a background drain and put a
+> durable marker between them, which changes what "correct after a crash" *means* for half these
+> points — in one case it inverts it. The revisions are marked per point. The method is untouched:
+> enumerate crash points, recover, check invariants.
+>
+> The single biggest change: **a crash after the marker's `rename()` must RECOVER the write, not
+> lose it.** Before ADR-58, a crash inside the transaction meant the write never happened and the
+> file correctly read as the previous version. Now the caller has already been told the write
+> succeeded, so losing it is data loss, and "the file reads as the previous version" is a FAIL where
+> it used to be a PASS. Any expectation below that still reads the old way is a bug in this
+> document, not in the daemon.
+
+**KROK 0 — the pending stage (NEW with ADR-58)**
+
+| Label | Kill point | What must be true after restart |
+|---|---|---|
+| `P1` | after the blob is durable in the store, before the marker is written to `pending/tmp/` | nothing acknowledged, nothing in `pending/queue/`, no `file_versions` row. An orphan blob may exist — invisible through the mount (Invariant #3) and reclaimable by GC-by-scan, identical to `K5` |
+| `P2` | after `write`+`fdatasync` into `pending/tmp/`, before the `rename()` into `queue/` | the caller was **not** acknowledged, so nothing may be recovered. A stray file remains under `pending/tmp/`; assert it is never replayed as a write and that `sweep_tmp` reclaims it |
+| `P3` | after the `rename()`, before the caller is acknowledged | the marker is durable. POSIX permits the write to be lost from the caller's view here, but SmartFS will recover it anyway: assert that after restart the write **is** committed, exactly once, and that the file reads as the new version |
+| `P4` | after acknowledgement, before the drain picks the marker up | **the write must survive.** The caller was told it succeeded. Assert restart commits it exactly once, `content_hash` correct, file reads as the new version, and the marker is gone from `queue/` afterwards |
+
 **KROK 1 — outside any transaction**
 
 | Label | Kill point | What must be true after restart |
@@ -321,25 +392,37 @@ pseudocode, which supersedes §11.1 KROK 1 and §12.1), plus FIX-02's worker bou
 | `K2` | after `INSERT INTO blobs … RETURNING`, before `store.put` (`inserted=TRUE`) | a `blobs` row exists with **no physical blob** and **no** `file_versions` referencing it. This is exactly FIX-04's poisoned row. Assert no `file_versions` row references it, then re-write the same content and assert the FIX-03 `store.exists` heal (or the FIX-04 compensating `DELETE`) makes the content readable |
 | `K3` | after `store.put` Ok, before `UPDATE blobs SET compressed_size` | blob present on disk, `compressed_size IS NULL`. Must be tolerated, not treated as corruption; content must still read back correctly |
 | `K4` | inside the `Err` branch, after the compensating `DELETE FROM blobs`, before returning `Err` | no `blobs` row, no orphan blob file, next write of the same content succeeds cleanly |
-| `K5` | end of KROK 1, before `BEGIN` | blob exists on disk and in `blobs`, but **zero** `file_versions` reference it. It must be invisible through the mount (Invariant #3) and reclaimable by GC-by-scan |
+| `K5` | end of KROK 1, before `BEGIN` | blob exists on disk and in `blobs`, but **zero** `file_versions` reference it. It must be invisible through the mount (Invariant #3) and reclaimable by GC-by-scan. *Under ADR-58 this is `P1`: KROK 1 is followed by the marker write, not by `BEGIN`.* |
 
-**KROK 2 — inside the transaction**
+**KROK 2 — inside the transaction (now executed by the drain, not by `release()`)**
+
+> Every point below crashes a transaction whose marker is already durable. So "full rollback" is
+> still the right assertion **for that transaction**, and it is no longer the end of the story: the
+> marker survives, the startup scan replays it, and the write must end up committed. Each row states
+> both halves. Asserting only the rollback half would let a lost acknowledged write pass as correct.
 
 | Label | Kill point | What must be true after restart |
 |---|---|---|
-| `K6` | after `SELECT … FOR UPDATE` and the `MAX(version_number)+1` computation, before `INSERT INTO file_versions` | full rollback; the file reads as the **previous** version |
-| `K7` | after `INSERT INTO file_versions`, before `INSERT INTO ast_nodes` | full rollback; no half-version |
-| `K8` | after `INSERT INTO ast_nodes`, before `UPDATE inode_registry` | full rollback; `inode_registry.current_blob_id` still points at the previous blob |
-| `K9` | after `UPDATE inode_registry`, immediately before `COMMIT` | full rollback. This is the highest-value point: any surviving row here means the "short transaction, SQL only, zero I/O" property of KROK 2 is not real |
+| `K6` | after `SELECT … FOR UPDATE` and the `MAX(version_number)+1` computation, before `INSERT INTO file_versions` | transaction rolls back fully; **then** the replay commits the write exactly once and the file reads as the **new** version. Reading as the previous version after replay has finished is a FAIL |
+| `K7` | after `INSERT INTO file_versions`, before `INSERT INTO ast_nodes` | full rollback, no half-version; then replay commits it exactly once, with its AST nodes |
+| `K8` | after `INSERT INTO ast_nodes`, before `UPDATE inode_registry` | full rollback, `inode_registry.current_blob_id` still on the previous blob; then replay moves it to the new one |
+| `K9` | after `UPDATE inode_registry`, immediately before `COMMIT` | full rollback — still the highest-value point, since any surviving row means the "short transaction, SQL only, zero I/O" property of KROK 2 is not real. Then replay commits it exactly once |
 
 **Post-commit and concurrency**
 
 | Label | Kill point | What must be true after restart |
 |---|---|---|
-| `K10` | immediately after `COMMIT`, before the FUSE reply reaches the caller | the version **is** committed even though the application saw a failed `write()`. Assert exactly one row per `(inode_id, version_number)`, `content_hash` correct, and the file reads as the new version. A lost-update here is acceptable POSIX; a *torn* state is not |
+| `K10` | *(pre-ADR-58 wording: immediately after `COMMIT`, before the FUSE reply reaches the caller)* — **the FUSE reply now happens long before the COMMIT, so this point no longer exists as written.** Its successor is: immediately after `COMMIT`, before the marker is unlinked | the version is committed and the marker is still on disk — exactly the state the idempotency key exists for. Assert the replay is a **no-op**: exactly one row per `(inode_id, version_number)`, no second version, `content_hash` correct, file reads as the new version, and the marker is gone afterwards. The pre-ADR-58 caller-visible case is now `P3` |
 | `K11` | during a concurrent `smartfs-ai` worker cycle, mid `finish_embed` / `refresh_is_current` | **at most one** `is_current=TRUE` per inode's AST node set (FIX-02); no version left stuck in `processing` forever — restart must reclaim it to `pending`; and the worker's activity must not have left a `file_versions` row mutated |
 | `K12` | kill **Postgres** (`docker kill`) rather than the daemon, at the K9 and K10 equivalents | same assertions as K9/K10; additionally the daemon must exit non-zero or recover cleanly, never serve stale reads from a dead pool |
 | `K13` | `pg_terminate_backend()` on the daemon's connection mid-transaction | transaction rolls back; the daemon surfaces an error to the caller rather than reporting success |
+
+**Back-pressure and the queue (NEW with ADR-58)**
+
+| Label | Kill point | What must be true after restart |
+|---|---|---|
+| `Q1` | kill the daemon while the pending queue holds a deep backlog | every acknowledged write in the queue is committed exactly once after restart, in `seq` order, with `version_number` contiguous. The seeded gate must refuse new writes with `EAGAIN` until the backlog drains, never accept them into an unbounded queue |
+| `Q2` | stop Postgres, write until the queue is full, restart Postgres | writes are refused with `EAGAIN` while it is down (never silently accepted and dropped), and every write that *was* acknowledged commits once the drain recovers. `EAGAIN` on a refused write is the correct outcome; a successful `write()` whose data never lands is not |
 
 Plus a **stochastic mode**: a hammer loop of concurrent writes with `kill -9` at random intervals,
 run for N iterations. This catches points nobody thought to label. It complements, and does not
@@ -365,7 +448,11 @@ and that `parent_version_id` forms a single unbroken chain.
 
 **Invariant #3 — the daemon is the only legal path to data.**
 For every regular file visible through the mount, SHA-256 its bytes and assert the digest equals the
-`content_hash` of the newest `file_versions` row for its inode. No visible file may lack a backing
+`content_hash` of the newest `file_versions` row for its inode — **after quiescing the pending
+queue.** Before quiesce the newest content legitimately has no row yet: it is served from ADR-58's
+read overlay and its marker is in `pending/queue/`. Checking without quiescing would report correct
+behaviour as a violation. Checking that a file's bytes match *neither* its newest row *nor* any
+queued marker remains a violation at any time. No visible file may lack a backing
 `file_versions` row. Conversely, count blob files on disk with no referencing `file_versions` row:
 those are GC candidates and are reported as a count, not an automatic failure — but a *growing*
 count across rounds is a leak and is reported as one.
