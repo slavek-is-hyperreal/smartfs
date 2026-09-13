@@ -46,13 +46,25 @@ Nazwa niesie `seq` i `content_hash` — to wystarcza do posortowania FIFO i odsi
 
 *Pytanie:* unikalność po `(path, version_seq)` czy po `content_hash`.
 
-**Rozstrzygnięcie: `(inode_id, version_number)`, z nową jawną migracją zakładającą na tę parę unikalny indeks.**
+**Rozstrzygnięcie: `(inode_id, version_number)`.**
+
+**Ustalenie z kroku A:** `migrations/001_core_schema.sql:127` już deklaruje `CONSTRAINT unique_version_per_inode UNIQUE (inode_id, version_number)`, potwierdzone w żywej bazie. Numeracja wersji ma więc swoje wymuszenie unikalności od pierwszej migracji niezależnie od tego, co jest kluczem idempotencji — i to ona wyłapałaby kolizję opisaną w rewizji niżej. Nic w tym ADR-ze nie dodaje migracji.
 
 Uściślenie względem treści pytania: `file_versions` nie ma kolumny `path` — ma `inode_id` i `version_number`. To jest naturalny kształt schematu i dokładnie ten, którego pilnuje Invariant #2 planu testowego ("żadne dwie wersje inode'a nie dzielą `version_number`").
 
 `content_hash` odrzucony: w CAS-ie z deduplikacją ten sam hash legalnie wskazuje wiele wierszy `file_versions` — dwa różne pliki o identycznej treści to poprawny, testowany stan (sekcja 1.4 planu testowego) — więc hash nie jest kluczem wersji.
 
-**Konsekwencja przyjęta świadomie:** `version_number` musi być znany już przy zapisie znacznika, więc numerowanie wersji wychodzi z transakcji drenażu do etapu pending. Serializatorem pozostaje Postgres — krótka transakcja `SELECT id FROM inode_registry WHERE id = $1 FOR UPDATE` + `MAX(version_number)+1`, wykonana w etapie pending. Nie da się tego zastąpić licznikiem w pamięci demona, bo `smartfs-cli` pisze do tej samej bazy niezależnie od demona (zbieżność obu ścieżek zapisu to sekcja 1.7 planu testowego), a dwa demony w xfstests to dwie osobne bazy, ale jeden demon i jedno CLI to ta sama. Ścieżka zapisu nadal traci ciężką część transakcji — `ast_nodes`, `UPDATE inode_registry`, indeksy `file_versions` — i to jest zysk, o który chodzi w ADR-ze; zostaje jedno tanie zapytanie pod blokadą wiersza.
+#### Rewizja z 2026-09-13, przy wchodzeniu w krok B
+
+Pierwotne rozstrzygnięcie brzmiało `(inode_id, version_number)` i zakładało, że `version_number` da się zaalokować w etapie pending. **Nie da się** — i to jest wada nie do obejścia, a nie szczegół implementacyjny:
+
+`MAX(version_number)+1` nie widzi wersji, które są już w `pending/queue/`, a jeszcze nie w `file_versions`. Dwa kolejne zapisy tego samego pliku dostają ten sam numer. Licznik w pamięci demona zamyka to tylko dla samego demona — `smartfs-cli` pisze do tej samej bazy jako osobny proces i też liczy `MAX+1` (zbieżność obu ścieżek to sekcja 1.7 planu testowego). `SELECT ... FOR UPDATE` nie pomaga, bo blokada znika po alokacji, a CLI i tak nie ma wglądu w kolejkę demona. Alternatywa z licznikiem w kolumnie `inode_registry` rozwiązałaby widoczność, ale kosztem migracji **i ciągłości numeracji**: spalony numer po nieudanym zapisie robi dziurę, a Invariant #2 planu testowego jawnie sprawdza `version_number` jako ciągłe `1..n`.
+
+**Rozstrzygnięcie po rewizji: kluczem idempotencji jest `version_id` (UUID) generowany przy zapisie znacznika, egzekwowany przez `ON CONFLICT (id) DO NOTHING` na kluczu głównym `file_versions`. `version_number` pozostaje liczony jako `MAX+1` wewnątrz transakcji drenażu, dokładnie jak dziś.**
+
+To jest wariant odrzucony wyżej w §Odrzucone alternatywy — zarzut brzmiał "kolejność numerów wynikałaby z kolejności drenażu, nie z kolejności zapisów". Zarzut się nie utrzymuje: punkt 3 Decyzji ustanawia **jednego konsumenta drenującego sekwencyjnie w kolejności FIFO**, więc kolejność drenażu jest kolejnością zapisów. `seq` w nazwie znacznika utrwala tę kolejność również dla replayu po craśhu, bo skan z punktu 4 sortuje po niej.
+
+Zyski względem pierwotnego rozstrzygnięcia: brak migracji, brak dziur w numeracji (`Invariant #2` planu testowego zostaje spełniony bez zmian), brak kolizji z `smartfs-cli`, i ścieżka zapisu nie musi w ogóle dotykać Postgresa — cała transakcja, łącznie z `SELECT FOR UPDATE`, przenosi się do drenażu. Pierwotne rozstrzygnięcie zostawiało na gorącej ścieżce jedno zapytanie pod blokadą wiersza; po rewizji nie zostaje żadne.
 
 ## Odrzucone alternatywy
 
@@ -64,7 +76,7 @@ Uściślenie względem treści pytania: `file_versions` nie ma kolumny `path` �
 
 **Limit kolejki przeliczany na bieżąco względem aktualnie wolnego RAM-u.** Odrzucone w punkcie 5 — ryzyko niestabilności sprzężenia zwrotnego pod presją pamięciową z zewnątrz procesu demona.
 
-**UUID wersji generowany przy znaczniku jako klucz idempotencji** (rozważony przy rozstrzyganiu #3). Nie wymagałby migracji, bo `ON CONFLICT (id) DO NOTHING` działałby na istniejącym kluczu głównym. Odrzucony, bo `version_number` byłby wtedy nadal liczony w transakcji drenażu — czyli kolejność numerów wersji wynikałaby z kolejności drenażu, nie z kolejności zapisów, co jest obserwowalną zmianą semantyki wersjonowania, a nie tylko szczegółem implementacyjnym.
+**UUID wersji generowany przy znaczniku jako klucz idempotencji** — początkowo odrzucony przy rozstrzyganiu #3 (argument: "kolejność numerów wynikałaby z kolejności drenażu, nie zapisów"), **następnie przyjęty** po rewizji z 2026-09-13. Argument okazał się nietrafiony, bo drenaż jest jednym konsumentem FIFO. Pełne uzasadnienie w §Rozstrzygnięcia #3.
 
 ## Konsekwencje
 
@@ -73,7 +85,7 @@ Uściślenie względem treści pytania: `file_versions` nie ma kolumny `path` �
 - `smartfs-cli status` (dziś `StatusArgs` bez pól) zyskuje w wyniku: liczbę znaczników w `pending/queue/`, wiek najstarszego nieskonsumowanego znacznika, bieżący rozmiar kolejki RAM względem limitu.
 - Nowa, jawnie nazwana podkomenda `smartfs-cli` do ręcznego wymuszenia skanu naprawczego poza harmonogramem — nazwa i sygnatura ustalane przy implementacji kroku E, nie zgadywane z góry (zasada 8 z [docs/06](../06-agentic-execution-plan.md)).
 - Scrub sum kontrolnych (punkt 7 Decyzji) to osobny, nowy komponent w `smartfs-store` — nie rozszerzenie skanu `pending/`.
-- Migracje SQL: **jedna nowa migracja**, wymuszona przez §Rozstrzygnięcia #3 — unikalny indeks na `(inode_id, version_number)` w `file_versions`. Jawny plik w `migrations/`, nigdy DDL w runtime (Root Invariant #4). Poza tym cały mechanizm punktów 1–6 żyje na ext4 i w RAM, nie w schemacie Postgresa.
+- Migracje SQL: **brak nowych migracji.** Klucz idempotencji z §Rozstrzygnięcia #3 jest już wymuszony przez `unique_version_per_inode` z `migrations/001_core_schema.sql` — sprawdzone przy kroku A, patrz korekta tam. Cały mechanizm punktów 1–6 żyje na ext4 i w RAM, nie w schemacie Postgresa.
 - **Plan testowy przestaje opisywać aktualny system.** [docs/testing/the-great-smartfs-test.md](../testing/the-great-smartfs-test.md) §2.2 sprawdza SQL-em zaraz po `sync`, że trzy nadpisania dały trzy wiersze `file_versions` — przy asynchronicznym drenażu to jest wyścig. §5.2 K6–K9 oczekuje po craśhu "pełny rollback, plik czyta się jako poprzednia wersja", podczas gdy pod tym ADR-em crash po `rename()` znacznika musi zapis **odtworzyć**. Aktualizacja obu sekcji należy do kroku F i idzie osobnym commitem, żeby zmiana asercji była widoczna jako zmiana asercji, a nie schowana w implementacji.
 
 ## Plan wykonania dla Claude Code

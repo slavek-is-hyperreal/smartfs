@@ -27,6 +27,7 @@ use smartfs_store::BlobStore;
 use uuid::Uuid;
 
 use crate::error::error_to_errno;
+use crate::pending::PendingPipeline;
 use crate::state::{inode_to_file_attr, FuseStateManager};
 
 /// Attribute / Entry cache TTL for FUSE operations.
@@ -42,6 +43,10 @@ pub struct SmartFsFuse {
     rt_handle: tokio::runtime::Handle,
     state: Arc<FuseStateManager>,
     force: bool,
+    /// Two-stage commit pipeline (ADR-58). There is deliberately no
+    /// synchronous fallback: a filesystem with two write paths is a filesystem
+    /// whose crash behaviour depends on how it was constructed.
+    pending: PendingPipeline,
 }
 
 /// @id: 85d0907f-cba5-4631-8aa8-53f612c0192f
@@ -54,6 +59,7 @@ impl SmartFsFuse {
         blob_dir: impl AsRef<Path>,
         rt_handle: tokio::runtime::Handle,
         force: bool,
+        pending: PendingPipeline,
     ) -> Self {
         Self {
             pool,
@@ -62,7 +68,15 @@ impl SmartFsFuse {
             rt_handle,
             state: Arc::new(FuseStateManager::new()),
             force,
+            pending,
         }
+    }
+
+    /// @id: 8c5e1a04-3d2b-4f77-91ce-6b0a4d9e7f13
+    /// Returns the pending pipeline, for the daemon's shutdown drain and for
+    /// status reporting.
+    pub fn pending(&self) -> &PendingPipeline {
+        &self.pending
     }
 
     /// @id: 7825d6e7-f809-41ab-b2c3-d4e5f6071829
@@ -591,8 +605,10 @@ impl Filesystem for SmartFsFuse {
                     let store = self.store.clone();
                     let inode_id = handle.inode_id;
                     let ast_nodes = handle.ast_nodes;
+                    let pending = self.pending.clone();
+                    let seq = self.pending.next_seq();
 
-                    let _ = self.block_on(async move {
+                    let commit = self.block_on(async move {
                         let record = smartfs_db::inode_get(&pool, inode_id).await?.ok_or_else(
                             || SmartFsError::NotFound(format!("Inode {inode_id} not found")),
                         )?;
@@ -655,23 +671,49 @@ impl Filesystem for SmartFsFuse {
                             }
                         }
 
-                        // Step 2: cow_commit
-                        smartfs_db::cow_commit(
-                            &pool,
+                        // Step 2 (ADR-58): no longer the Postgres transaction.
+                        // Publish a durable pending marker and hand it to the
+                        // drain. The blob above is already on disk, so once the
+                        // marker's rename() lands the write survives a crash
+                        // even though nothing has touched file_versions yet.
+                        let marker = smartfs_schema::PendingMarker {
+                            seq,
                             inode_id,
-                            Some(blob_id),
-                            &hash,
+                            parent_inode: record.parent_id,
+                            name: record.name.clone(),
+                            // Idempotency key for replay: the drain inserts
+                            // with ON CONFLICT (id) DO NOTHING, so a marker
+                            // that survived its own COMMIT replays as a no-op.
+                            version_id: Uuid::new_v4(),
+                            content_hash: hash.clone(),
+                            blob_id: Some(blob_id),
                             size,
                             compressed_size,
-                            None,
-                            Some("generic"),
-                            None,
-                            &ast_nodes,
-                        )
-                        .await?;
+                            external_path: None,
+                            mode: record.mode as u32,
+                            uid: record.uid as u32,
+                            gid: record.gid as u32,
+                            special_type: Some("generic".to_string()),
+                            special_data: None,
+                            ast_nodes: serde_json::to_value(&ast_nodes).unwrap_or_else(
+                                |_| serde_json::Value::Array(Vec::new()),
+                            ),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                        };
+
+                        pending.submit(&marker).await?;
 
                         Ok::<_, SmartFsError>(())
                     });
+
+                    // A refused write must reach the caller. Swallowing this is
+                    // how an acknowledged-but-lost write happens, which is the
+                    // one outcome ADR-58 exists to prevent.
+                    if let Err(e) = commit {
+                        tracing::error!("release() could not queue the write: {e}");
+                        reply.error(error_to_errno(&e));
+                        return;
+                    }
                 }
             }
 

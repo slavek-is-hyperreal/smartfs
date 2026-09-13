@@ -10,6 +10,10 @@ pub fn error_to_errno(err: &SmartFsError) -> libc::c_int {
         SmartFsError::Conflict(_) => libc::EEXIST,
         SmartFsError::SyntaxError(_) => libc::EACCES,
         SmartFsError::Io(e) => e.raw_os_error().unwrap_or(libc::EIO),
+        // ADR-58 point 6: back-pressure, not data loss. EAGAIN tells the caller
+        // the write was refused and may be retried — it never means a write was
+        // accepted and then dropped.
+        SmartFsError::PendingQueueFull => libc::EAGAIN,
         _ => libc::EIO,
     }
 }
@@ -35,6 +39,11 @@ mod tests {
         assert_eq!(
             error_to_errno(&SmartFsError::Db("query failed".into())),
             libc::EIO
+        );
+        assert_eq!(
+            error_to_errno(&SmartFsError::PendingQueueFull),
+            libc::EAGAIN,
+            "a full queue must be retryable back-pressure, never a generic I/O error"
         );
     }
 }

@@ -33,8 +33,8 @@ pub use models::{
 pub use preflight::{column_exists, ping, table_exists};
 pub use search::{count_all_unconsolidated, search_fulltext_bm25, set_search_text};
 pub use versions::{
-    cow_commit, get_ast_nodes, version_find_by_hash, version_get, version_get_by_id,
-    version_history,
+    cow_commit, cow_commit_with_id, get_ast_nodes, version_find_by_hash, version_get,
+    version_get_by_id, version_history, CowCommitOutcome,
 };
 pub use worker::{
     claim_pending_to_processing, mark_clean, mark_failed, oldest_pending_age_secs,

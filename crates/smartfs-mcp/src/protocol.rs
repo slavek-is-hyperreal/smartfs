@@ -122,6 +122,13 @@ impl From<SmartFsError> for JsonRpcError {
                 message: "Advisory lock unavailable".to_string(),
                 data: None,
             },
+            // ADR-58: back-pressure, not failure. Its own code so a client can
+            // tell "retry this in a moment" from "this will never work".
+            SmartFsError::PendingQueueFull => Self {
+                code: -32012,
+                message: "Pending queue is full; write not accepted, retry later".to_string(),
+                data: None,
+            },
             SmartFsError::Io(e) => Self::internal_error(format!("I/O error: {e}")),
             SmartFsError::Other(msg) => Self::internal_error(msg),
         }

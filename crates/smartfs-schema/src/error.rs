@@ -37,6 +37,14 @@ pub enum SmartFsError {
     #[error("Advisory lock unavailable; batch skipped for concurrent worker")]
     AdvisoryLockUnavailable,
 
+    /// The pending queue hit its RAM limit and did not free a slot within the
+    /// block timeout (ADR-58 decision point 6, §Rozstrzygnięcia #1).
+    ///
+    /// Means "not accepted", never "accepted and lost": no acknowledged write
+    /// is ever dropped on this path. `smartfs-fuse` maps it to `EAGAIN`.
+    #[error("Pending queue is full; write not accepted, retry later")]
+    PendingQueueFull,
+
     #[error("Internal error: {0}")]
     Other(String),
 }

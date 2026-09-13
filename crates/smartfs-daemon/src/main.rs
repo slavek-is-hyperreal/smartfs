@@ -19,7 +19,7 @@ use fuser::{BackgroundSession, MountOption};
 use smartfs_daemon::args::DaemonArgs;
 use smartfs_daemon::exit;
 use smartfs_daemon::startup;
-use smartfs_fuse::{spawn_mount_smartfs, SmartFsFuse};
+use smartfs_fuse::{spawn_mount_smartfs, PendingLimits, PendingPipeline, SmartFsFuse};
 use smartfs_store::BlobStore;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::JoinHandle;
@@ -30,6 +30,10 @@ use tracing_subscriber::{reload, EnvFilter};
 /// How long step 10 waits for the kernel to show the mount as a live FUSE
 /// filesystem before declaring the mount failed.
 const MOUNT_READY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a clean shutdown waits for the ADR-58 pending queue to drain.
+/// Exceeding it is safe: unfinished markers are durable and replay on restart.
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Crash-point labels compiled into this binary (§1.5).
 ///
@@ -185,12 +189,27 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         options.push(MountOption::AllowOther);
     }
 
+    // ADR-58: the two-stage commit pipeline. Started before the mount so no
+    // write can ever reach a filesystem whose drain is not running.
+    let limits = PendingLimits::from_env();
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        &store_path,
+        &tokio::runtime::Handle::current(),
+        limits,
+    )
+    .await
+    .map_err(|e| anyhow!("{e}"))
+    .context("cannot start the pending-commit pipeline")
+    .gate(exit::STORE_OPEN_FAILED)?;
+
     let fs = SmartFsFuse::new(
         pool.clone(),
         Arc::clone(&store),
         &store_path,
         tokio::runtime::Handle::current(),
         false,
+        pipeline.clone(),
     );
 
     // Held for the whole process lifetime: dropping it unmounts.
@@ -290,6 +309,23 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         handle.abort();
     }
     tracing::info!(count = supervisors.len(), "consolidation supervisors stopped");
+
+    // Give the pending drain a chance to land queued writes before we go
+    // (ADR-58). Failing to finish is not data loss — the markers stay on disk
+    // and the next start replays them — so this never blocks shutdown for long.
+    let queued = pipeline.ram_depth();
+    if queued > 0 {
+        tracing::info!(queued, "draining pending queue before unmount");
+        if pipeline.quiesce(SHUTDOWN_DRAIN_TIMEOUT).await {
+            tracing::info!("pending queue drained");
+        } else {
+            tracing::warn!(
+                remaining = pipeline.ram_depth(),
+                "pending queue not drained within the shutdown budget; \
+                 markers remain on disk and will be replayed on next start"
+            );
+        }
+    }
 
     drop(session); // unmounts
     tracing::info!("FUSE session dropped, {} unmounted", mountpoint.display());

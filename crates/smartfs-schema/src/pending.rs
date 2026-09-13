@@ -21,9 +21,9 @@ use crate::types::Uuid;
 /// The file it identifies is addressed by `inode_id`; `parent_inode` and `name`
 /// are carried for diagnostics and for the CLI's repair reporting. The absolute
 /// path is deliberately **not** stored: it is derivable, it is never a key
-/// (ADR-58 §Rozstrzygnięcia #3 made `(inode_id, version_number)` the key), and
-/// resolving it would put a parent-walk back onto the very hot path this ADR
-/// exists to shorten.
+/// (ADR-58 §Rozstrzygnięcia #3 made `version_id` the key), and resolving it
+/// would put a parent-walk back onto the very hot path this ADR exists to
+/// shorten.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingMarker {
     /// Monotonic per-daemon sequence. Also encoded in the filename, so the
@@ -39,9 +39,17 @@ pub struct PendingMarker {
     /// File name within its parent directory. Diagnostics only, never a key.
     pub name: String,
 
-    /// Version number, allocated in the pending stage (ADR-58 §Rozstrzygnięcia
-    /// #3). Together with `inode_id` this is the replay idempotency key.
-    pub version_number: i32,
+    /// Primary key the drain will insert this version under, generated here in
+    /// the pending stage. This is the replay idempotency key (ADR-58
+    /// §Rozstrzygnięcia #3, rewizja): the drain inserts with
+    /// `ON CONFLICT (id) DO NOTHING`, so replaying a marker whose transaction
+    /// already committed is a no-op.
+    ///
+    /// `version_number` is deliberately NOT carried: it is computed as `MAX+1`
+    /// inside the drain transaction, because a number allocated here would not
+    /// be visible to `smartfs-cli` writing to the same database, and two queued
+    /// writes to one file would collide on it.
+    pub version_id: Uuid,
 
     /// SHA-256 of the plaintext bytes, before compression (Root Invariant #1).
     pub content_hash: String,
@@ -125,7 +133,7 @@ mod tests {
             inode_id: Uuid::new_v4(),
             parent_inode: None,
             name: "f.txt".to_string(),
-            version_number: 1,
+            version_id: Uuid::new_v4(),
             content_hash: hash.to_string(),
             blob_id: Some(Uuid::new_v4()),
             size: 3,

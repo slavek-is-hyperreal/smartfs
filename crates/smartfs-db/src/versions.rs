@@ -22,6 +22,87 @@ pub async fn cow_commit(
     special_data: Option<serde_json::Value>,
     ast_nodes: &[AstNodeInsert],
 ) -> Result<Uuid> {
+    cow_commit_with_id(
+        pool,
+        Uuid::new_v4(),
+        inode_id,
+        blob_id,
+        content_hash,
+        size,
+        compressed_size,
+        external_path,
+        special_type,
+        special_data,
+        ast_nodes,
+    )
+    .await
+    .map(|outcome| outcome.version_id)
+}
+
+/// @id: fac180c4-ded4-4668-89a2-3dedf00e804c
+/// What `cow_commit_with_id` did, so a replaying caller can tell a fresh commit
+/// from a marker whose transaction had already landed before the crash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CowCommitOutcome {
+    /// Primary key of the `file_versions` row, whether inserted now or already present.
+    pub version_id: Uuid,
+    /// `version_number` the row carries.
+    pub version_number: i32,
+    /// `false` when the row already existed and this call changed nothing.
+    pub inserted: bool,
+}
+
+/// @id: e1e11328-26b4-49fa-b77f-887032d37f43
+/// `cow_commit` with a caller-supplied `version_id`, idempotent on replay.
+///
+/// This is KROK 2 of the two-stage commit (ADR-58 decision point 3): the drain
+/// hands over a `version_id` it generated when it wrote the pending marker, and
+/// the insert carries `ON CONFLICT (id) DO NOTHING`. Replaying a marker whose
+/// transaction already committed therefore changes nothing and reports
+/// `inserted: false` — which is exactly the state a crash between COMMIT and
+/// the marker's `unlink` leaves behind.
+///
+/// `version_number` is computed here, inside the transaction, as `MAX+1` under
+/// the inode's row lock. It is deliberately not allocated at marker-write time:
+/// a number chosen then would be invisible both to a second queued write and to
+/// `smartfs-cli` writing to the same database, and the two would collide
+/// (ADR-58 §Rozstrzygnięcia #3, rewizja). Because the drain is a single FIFO
+/// consumer, numbering here still follows write order.
+///
+/// `parent_version_id` is likewise resolved here rather than at marker time —
+/// the predecessor may itself still have been sitting in the queue back then.
+#[allow(clippy::too_many_arguments)]
+pub async fn cow_commit_with_id(
+    pool: &PgPool,
+    version_id: Uuid,
+    inode_id: Uuid,
+    blob_id: Option<Uuid>,
+    content_hash: &str,
+    size: i64,
+    compressed_size: Option<i64>,
+    external_path: Option<&str>,
+    special_type: Option<&str>,
+    special_data: Option<serde_json::Value>,
+    ast_nodes: &[AstNodeInsert],
+) -> Result<CowCommitOutcome> {
+    // Fast path for replay: if this version already landed, do nothing at all.
+    // Re-running the inode_registry update would be wrong here, because a newer
+    // version may have been committed in the meantime.
+    if let Some(existing) = sqlx::query_scalar::<_, i32>(
+        "SELECT version_number FROM file_versions WHERE id = $1",
+    )
+    .bind(version_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| SmartFsError::Db(format!("cow_commit replay probe: {e}")))?
+    {
+        return Ok(CowCommitOutcome {
+            version_id,
+            version_number: existing,
+            inserted: false,
+        });
+    }
+
     let mut tx = pool
         .begin()
         .await
@@ -54,12 +135,11 @@ pub async fn cow_commit(
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit prev version lookup: {e}")))?;
 
-    let version_id = Uuid::new_v4();
     let stype = special_type.unwrap_or("generic");
     let sdata = special_data.unwrap_or_else(|| serde_json::json!({}));
 
     // 4. Insert file_version
-    sqlx::query(
+    let inserted = sqlx::query(
         r#"
         INSERT INTO file_versions (
             id, inode_id, version_number, blob_id, size, compressed_size,
@@ -67,6 +147,7 @@ pub async fn cow_commit(
             status, parent_version_id
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending'::processing_status, $11)
+        ON CONFLICT (id) DO NOTHING
         "#,
     )
     .bind(version_id)
@@ -83,6 +164,17 @@ pub async fn cow_commit(
     .execute(&mut *tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit insert file_version: {e}")))?;
+
+    if inserted.rows_affected() == 0 {
+        // Lost the race to a concurrent replay of the same marker. Roll back
+        // rather than layering a second set of AST nodes onto someone else's row.
+        let _ = tx.rollback().await;
+        return Ok(CowCommitOutcome {
+            version_id,
+            version_number: next_ver,
+            inserted: false,
+        });
+    }
 
     // 5. Insert AST nodes (if any)
     for node in ast_nodes {
@@ -130,7 +222,11 @@ pub async fn cow_commit(
         .await
         .map_err(|e| SmartFsError::Db(format!("cow_commit commit tx: {e}")))?;
 
-    Ok(version_id)
+    Ok(CowCommitOutcome {
+        version_id,
+        version_number: next_ver,
+        inserted: true,
+    })
 }
 
 /// @id: a48b59e3-23a7-47b6-9bb2-1594ec1b01c3

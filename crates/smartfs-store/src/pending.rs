@@ -226,7 +226,7 @@ mod tests {
             inode_id: Uuid::new_v4(),
             parent_inode: Some(Uuid::new_v4()),
             name: format!("file-{seq}.txt"),
-            version_number: seq as i32,
+            version_id: Uuid::new_v4(),
             content_hash: hash.to_string(),
             blob_id: Some(Uuid::new_v4()),
             size: 11,
