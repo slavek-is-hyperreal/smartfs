@@ -13,6 +13,7 @@ use crate::commands::*;
 pub async fn dispatch_command(
     pool: &PgPool,
     store: &dyn BlobStore,
+    store_path: &std::path::Path,
     command: &Commands,
 ) -> Result<String> {
     match command {
@@ -133,18 +134,52 @@ pub async fn dispatch_command(
             ))
         }
         Commands::Status(args) => {
-            let res = handle_status(pool, args).await?;
+            let res = handle_status(pool, store_path, args).await?;
             let age_str = match res.oldest_pending_age_secs {
                 Some(age) => format!("{:.1}s", age),
                 None => "None (queue empty)".to_string(),
             };
+            // ADR-58: the on-disk queue is reported separately from the
+            // embedding backlog. They are different queues with different
+            // failure modes, and merging them would hide either one.
+            let queue_age = match res.pending_queue_oldest_age_secs {
+                Some(age) => format!("{:.1}s", age),
+                None => "None (queue empty)".to_string(),
+            };
             Ok(format!(
-                "SmartFS System Status:\n  Pending backlog count: {}\n  Oldest pending age:    {}\n  Unconsolidated embeds: {}\n  Calibrated models:     {}",
+                "SmartFS System Status:\n  \
+                 Pending backlog count: {}\n  \
+                 Oldest pending age:    {}\n  \
+                 Unconsolidated embeds: {}\n  \
+                 Calibrated models:     {}\n\
+                 Write queue (ADR-58, on disk):\n  \
+                 Uncommitted markers:   {}\n  \
+                 Oldest marker age:     {}",
                 res.pending_backlog_count,
                 age_str,
                 res.unconsolidated_embedding_count,
-                res.calibrated_models_count
+                res.calibrated_models_count,
+                res.pending_queue_depth,
+                queue_age
             ))
+        }
+        Commands::Recover(args) => {
+            let res = handle_recover(pool, store_path, args).await?;
+            match res.report {
+                None => Ok(format!(
+                    "Recovery dry run over {}:\n  {} uncommitted marker(s) queued. \
+                     Re-run without --dry-run to commit them.",
+                    res.queue_dir, res.found
+                )),
+                Some(r) => Ok(format!(
+                    "Recovery pass over {}:\n  \
+                     Found:             {}\n  \
+                     Committed now:     {}\n  \
+                     Already committed: {}\n  \
+                     Failed (left for retry): {}",
+                    res.queue_dir, r.found, r.committed, r.already_committed, r.failed
+                )),
+            }
         }
     }
 }
@@ -153,7 +188,8 @@ pub async fn dispatch_command(
 /// Runs the SmartFS CLI application with the given arguments.
 pub async fn run_cli(cli: Cli) -> Result<()> {
     let pool = smartfs_db::connect_pool(&cli.database_url()).await?;
-    let store = LocalDiskStore::new(cli.store_path());
+    let store_path = cli.store_path();
+    let store = LocalDiskStore::new(&store_path);
 
     // For `cat`, write raw bytes to stdout directly
     if let Commands::Cat(ref args) = cli.command {
@@ -162,7 +198,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    let output = dispatch_command(&pool, &store, &cli.command).await?;
+    let output = dispatch_command(&pool, &store, &store_path, &cli.command).await?;
     println!("{output}");
     Ok(())
 }

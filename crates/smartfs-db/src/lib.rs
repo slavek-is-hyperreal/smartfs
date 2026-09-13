@@ -11,6 +11,7 @@ pub mod embeddings;
 pub mod inodes;
 pub mod models;
 pub mod preflight;
+pub mod replay;
 pub mod search;
 pub mod versions;
 pub mod worker;
@@ -32,6 +33,7 @@ pub use models::{
     FulltextHitKind, InodeRecord,
 };
 pub use preflight::{column_exists, ping, table_exists};
+pub use replay::{commit_pending_marker, replay_pending_queue, ReplayReport};
 pub use search::{count_all_unconsolidated, search_fulltext_bm25, set_search_text};
 pub use versions::{
     cow_commit, cow_commit_with_id, get_ast_nodes, version_find_by_hash, version_get,

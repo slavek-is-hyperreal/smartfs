@@ -487,66 +487,11 @@ async fn drain_loop(
     tracing::info!("pending drain stopped");
 }
 
-/// @id: 428a690f-3abd-42ff-b76a-244d38466f18
 /// Commits one marker and checkpoints it by unlinking.
 ///
-/// Safe to call twice on the same marker: `cow_commit_with_id` is idempotent on
-/// `version_id`, which is exactly the state a crash between COMMIT and the
-/// unlink leaves behind.
-///
-/// `Ok(None)` means the marker was already gone, so this call checkpointed
-/// nothing. `Ok(Some(inserted))` means this call removed it, with `inserted`
-/// saying whether the transaction was new or a replay no-op. Callers use the
-/// outer `Option` to decide whether to give a queue slot back.
-pub async fn commit_one(
-    pool: &PgPool,
-    queue: &PendingQueue,
-    file_name: &str,
-) -> Result<Option<bool>> {
-    let marker = match queue.read(file_name).await? {
-        Some(m) => m,
-        // Already drained by someone else. Not an error, and not ours to
-        // account for — whoever removed it freed its slot.
-        None => return Ok(None),
-    };
-
-    let ast_nodes: Vec<smartfs_db::AstNodeInsert> =
-        serde_json::from_value(marker.ast_nodes.clone()).map_err(|e| {
-            SmartFsError::Store(format!("pending marker {file_name} has unreadable ast_nodes: {e}"))
-        })?;
-
-    let outcome = smartfs_db::cow_commit_with_id(
-        pool,
-        marker.version_id,
-        marker.inode_id,
-        marker.blob_id,
-        &marker.content_hash,
-        marker.size,
-        marker.compressed_size,
-        marker.external_path.as_deref(),
-        marker.special_type.as_deref(),
-        marker.special_data.clone(),
-        &ast_nodes,
-    )
-    .await?;
-
-    // Checkpoint. Until this runs the write is replayable; after it, committed.
-    queue.remove(file_name).await?;
-
-    if outcome.inserted {
-        tracing::debug!(
-            version = outcome.version_number,
-            inode = %marker.inode_id,
-            "pending marker committed"
-        );
-    } else {
-        tracing::info!(
-            version_id = %marker.version_id,
-            "pending marker was already committed before the crash; replay was a no-op"
-        );
-    }
-    Ok(Some(outcome.inserted))
-}
+/// Re-exported from `smartfs-db`, where it lives so `smartfs-cli` can replay a
+/// queue without depending on `fuser`.
+pub use smartfs_db::commit_pending_marker as commit_one;
 
 #[cfg(test)]
 mod tests {

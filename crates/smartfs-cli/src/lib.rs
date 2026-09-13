@@ -15,13 +15,13 @@ pub mod path;
 
 pub use args::{
     CalibrateArgs, CatArgs, Cli, Commands, ConceptsArgs, DiffArgs, HistoryArgs, ImportArgs,
-    ImportMode, SearchArgs, StatusArgs, WriteArgs,
+    ImportMode, RecoverArgs, SearchArgs, StatusArgs, WriteArgs,
 };
 pub use commands::{
     handle_calibrate, handle_cat, handle_concepts, handle_diff, handle_history, handle_import,
-    handle_search, handle_status, handle_write, CalibrateResult, CatResult, ConceptSummary,
-    ConceptsResult, DiffResult, HistoryResult, ImportResult, SearchResult, SystemStatus,
-    WriteResult,
+    handle_recover, handle_search, handle_status, handle_write, read_pending_queue_state,
+    CalibrateResult, CatResult, ConceptSummary, ConceptsResult, DiffResult, HistoryResult,
+    ImportResult, RecoverResult, SearchResult, SystemStatus, WriteResult,
 };
 pub use dispatch::{dispatch_command, run_cli};
 pub use path::{resolve_or_create_dir_path, resolve_or_create_file_path, resolve_path};

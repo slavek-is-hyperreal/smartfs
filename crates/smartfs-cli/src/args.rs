@@ -77,6 +77,9 @@ pub enum Commands {
 
     /// Display system status, pending backlog, and unconsolidated counts.
     Status(StatusArgs),
+
+    /// Force an ADR-58 recovery pass over the pending write queue now.
+    Recover(RecoverArgs),
 }
 
 /// @id: e6a1b2c3-1003-4000-8000-000000000003
@@ -200,3 +203,17 @@ pub struct CalibrateArgs {
 /// Arguments for `status` command.
 #[derive(Args, Debug, Clone, PartialEq, Default)]
 pub struct StatusArgs {}
+
+/// @id: 9d2c74a8-3e5f-4610-b8a1-c07f5e93d2b6
+/// Arguments for the `recover` command (ADR-58).
+#[derive(Args, Debug, Clone, PartialEq)]
+pub struct RecoverArgs {
+    /// Report what is queued without committing anything.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+
+    /// Age floor, in seconds, for reclaiming staging files left by a crash
+    /// between write and rename. Keeps the sweep clear of writes in flight.
+    #[arg(long, default_value_t = 3600)]
+    pub sweep_tmp_older_than_secs: u64,
+}

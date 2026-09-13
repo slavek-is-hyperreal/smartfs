@@ -1,6 +1,6 @@
 {
   "_comment": "Written by scripts/version_bump.py. Hash covers each crate's src/tests/benches/examples/build.rs plus its Cargo.toml with the version line removed.",
-  "updated_at": "2026-09-13T00:47:49+00:00",
+  "updated_at": "2026-09-13T00:52:02+00:00",
   "crates": {
     "smartfs-ai": {
       "version": "0.1.0",
@@ -8,8 +8,8 @@
       "path": "crates/smartfs-ai"
     },
     "smartfs-cli": {
-      "version": "0.1.0",
-      "hash": "657ce5f31f79b55ac35c313dcbe158e2d8c9feb6ab473524bc1e363f2685d1f9",
+      "version": "0.1.1",
+      "hash": "d8d2b49e28167aba530c7095960289836b9fa1d7e0e042c174ec6bf8baf173c0",
       "path": "crates/smartfs-cli"
     },
     "smartfs-compress": {
@@ -23,8 +23,8 @@
       "path": "crates/smartfs-daemon"
     },
     "smartfs-db": {
-      "version": "0.1.2",
-      "hash": "faa28d375faff088f11cd4e507933b7026cffd34172964dff97789f1ee8a477e",
+      "version": "0.1.3",
+      "hash": "abce7db699f8d8bc9cfb2a7732e3886575a56763d9ee4747d99e479d2eaa5a0b",
       "path": "crates/smartfs-db"
     },
     "smartfs-docgen": {
@@ -33,8 +33,8 @@
       "path": "crates/smartfs-docgen"
     },
     "smartfs-fuse": {
-      "version": "0.1.2",
-      "hash": "3f37e492564bad62f3a106cdb6d63a2eee4c7154c58e803a74d04f454a98d902",
+      "version": "0.1.3",
+      "hash": "9279dc7afd8ec64bcd5da9d25b21ffc4f2cfa87660ddc03569acc7dda974e66e",
       "path": "crates/smartfs-fuse"
     },
     "smartfs-ipfs": {

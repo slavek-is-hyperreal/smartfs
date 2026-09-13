@@ -117,12 +117,12 @@ async fn test_dispatch_write_cat_history_lifecycle() {
     assert_eq!(diff_res.v2, 2);
 
     // 6. Test dispatch_command output string formatting
-    let dispatch_out = dispatch_command(&pool, store.as_ref(), &Commands::Cat(cat_v1_args))
+    let dispatch_out = dispatch_command(&pool, store.as_ref(), &temp_dir, &Commands::Cat(cat_v1_args))
         .await
         .expect("dispatch cat should succeed");
     assert_eq!(dispatch_out, String::from_utf8_lossy(content));
 
-    let hist_out = dispatch_command(&pool, store.as_ref(), &Commands::History(hist_args))
+    let hist_out = dispatch_command(&pool, store.as_ref(), &temp_dir, &Commands::History(hist_args))
         .await
         .expect("dispatch history should succeed");
     assert!(hist_out.contains("Version history for"));
@@ -142,13 +142,13 @@ async fn test_dispatch_status_and_calibrate() {
     let store = Arc::new(LocalDiskStore::new(&temp_dir));
 
     // 1. Status command
-    let status_res = handle_status(&pool, &StatusArgs {})
+    let status_res = handle_status(&pool, &temp_dir, &StatusArgs {})
         .await
         .expect("status should succeed");
     assert!(status_res.pending_backlog_count >= 0);
     assert!(status_res.unconsolidated_embedding_count >= 0);
 
-    let status_out = dispatch_command(&pool, store.as_ref(), &Commands::Status(StatusArgs {}))
+    let status_out = dispatch_command(&pool, store.as_ref(), &temp_dir, &Commands::Status(StatusArgs {}))
         .await
         .expect("dispatch status");
     assert!(status_out.contains("SmartFS System Status:"));
@@ -168,7 +168,7 @@ async fn test_dispatch_status_and_calibrate() {
         .expect("calibrate should succeed");
     assert!((cal_res.join_threshold - 0.18).abs() < 1e-6);
 
-    let cal_out = dispatch_command(&pool, store.as_ref(), &Commands::Calibrate(cal_args))
+    let cal_out = dispatch_command(&pool, store.as_ref(), &temp_dir, &Commands::Calibrate(cal_args))
         .await
         .expect("dispatch calibrate");
     assert!(cal_out.contains("Successfully calibrated"));
