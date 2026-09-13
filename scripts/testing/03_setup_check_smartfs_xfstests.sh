@@ -33,8 +33,8 @@ XFS_DIR="${XFS_DIR:-${SMARTFS_REPO}/third_party/xfstests}"
 # instances, two mountpoints, two blob stores and - critically - two SEPARATE
 # databases. Sharing one database across TEST_DEV and SCRATCH_DEV produces
 # inode-namespace collisions that look exactly like filesystem corruption.
-TEST_MNT="${TEST_MNT:-/mnt/smartfs-xfs-test}"
-SCRATCH_MNT_DIR="${SCRATCH_MNT_DIR:-/mnt/smartfs-xfs-scratch}"
+TEST_MNT="${TEST_MNT:-${SMARTFS_BACKING_MOUNT}/mnt-xfs-test}"
+SCRATCH_MNT_DIR="${SCRATCH_MNT_DIR:-${SMARTFS_BACKING_MOUNT}/mnt-xfs-scratch}"
 TEST_STORE="${TEST_STORE:-${SMARTFS_BACKING_MOUNT}/xfs-test-blobs}"
 SCRATCH_STORE="${SCRATCH_STORE:-${SMARTFS_BACKING_MOUNT}/xfs-scratch-blobs}"
 PG_ADMIN_URL="${PG_ADMIN_URL:-postgres://postgres:postgres@172.17.0.2:5432/postgres}"

@@ -110,6 +110,33 @@ Dlatego pętla ma blokady mechaniczne, nie deklaratywne:
 | brak cichego regresu | twarde zatrzymanie, gdy zdawalność spada albo etap, który przechodził, przestaje |
 | pętla się kończy | limit iteracji, raport niezależnie od wyniku |
 
+### Kanał sterowania — root zostaje przy człowieku
+
+Właściciel uruchamia zestaw **raz**, z sudo:
+
+```
+sudo scripts/run-great-smartfs-test.sh --watch
+```
+
+Po każdym przebiegu skrypt nie kończy się — zostaje rezydentny i czeka na plik:
+
+| plik | znaczenie |
+|---|---|
+| `test-results/_control/run` | ponów cały przebieg |
+| `test-results/_control/stop` | zwolnij roota i zakończ |
+| `test-results/_control/STATUS` | co robi w tej chwili (czyta się bez uprawnień) |
+| `test-results/_control/LAST-RUN.txt` | manifest ostatniej iteracji |
+
+Katalog należy do wywołującego, więc agent bez uprawnień może iterować: edytuje kod, robi `touch .../run`, czyta artefakty. **Nigdy nie trzyma roota.** Idle-budżet (domyślnie 12 h) zwalnia roota sam, jeśli nikt nie wróci.
+
+Interfejs to świadomie dwa puste pliki i nic więcej. Plik sterujący, którego *treść* byłaby wykonywana, to root shell przebrany za automatyzację; „ponów zacommitowany zestaw" i „zatrzymaj się" są audytowalne, a jedyne, co zmienia się między iteracjami, to kod w gicie.
+
+Każda iteracja przebudowuje workspace jako wywołujący (nie root), więc poprawki wchodzą do przebiegu automatycznie i `target/` nie zmienia właściciela.
+
+### Nic nie pisze na partycję systemową
+
+Etap 4 zabija demona z założenia, a writer, który przeżyje unmount, otwiera ścieżkę na nowo i kładzie **prawdziwy** plik w katalogu pod spodem. Dlatego domyślne `CRASH_MOUNT`, `TEST_MNT` i `SCRATCH_MNT_DIR` przeniesiono z `/mnt/*` na partycję testową, a wrapper **asertuje** — nie zakłada — że blob store, mountpointy, tmp, logi i wyniki nie rozwiązują się na urządzenie roota. Ta awaria jest cicha, dopóki `/` się nie zapełni, więc musi być sprawdzana, a nie pilnowana dyscypliną.
+
 Zasada nadrzędna, z §7.3 planu testowego: **jeśli skrypt został zmieniony, żeby etap przeszedł, ta zmiana sama jest znaleziskiem i musi zostać zgłoszona przed wynikiem.** Dotyczy to również zmian wprowadzonych w trakcie pętli.
 
 ## 7. Znaleziska otwarte

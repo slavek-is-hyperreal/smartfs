@@ -16,6 +16,11 @@
 #
 #   --skip-apt            do not install the xfstests build dependencies
 #   --with-xfstests-run   also run ./check-smartfs -g generic (HOURS; off by default)
+#   --watch               after each pass, stay resident as root and re-run when
+#                         test-results/_control/run appears. Lets an unprivileged
+#                         agent drive fix-and-rerun without ever holding root.
+#                         Stop it with test-results/_control/stop or Ctrl+C.
+#   --watch-timeout N     seconds of idling before root is released (default 43200)
 #   --stages "0 1 2"      run only these stages (default: 0 1 2 3 4 5)
 #                         stage 5 is perf DIAGNOSTICS: it records numbers and
 #                         never fails on a slow one
@@ -45,11 +50,15 @@ CALLER_HOME="$(getent passwd "$CALLER" | cut -d: -f6)"
 
 INSTALL_APT=1
 RUN_XFSTESTS=0
+WATCH=0
+WATCH_TIMEOUT="${WATCH_TIMEOUT:-43200}"   # 12h of idling, then root is released
 STAGES="0 1 2 3 4 5"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-apt)          INSTALL_APT=0; shift ;;
     --with-xfstests-run) RUN_XFSTESTS=1; shift ;;
+    --watch)             WATCH=1; shift ;;
+    --watch-timeout)     WATCH_TIMEOUT="$2"; shift 2 ;;
     --stages)            STAGES="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -66,6 +75,7 @@ bad()  { printf '%s   ✗ %s%s\n' "$C_RED" "$*" "$C_OFF" >&2; }
 # reach them pointed at the wrong disk. sdb/sdc hold the real ZFS pool and are
 # never touched, directly or indirectly.
 say "safety interlock"
+ROOT_DEV="$(df --output=source / | tail -n1 | tr -d ' ')"
 BACKING_DEV="/dev/sda3"
 EXPECT_LABEL="smartfs-test"
 ACTUAL_LABEL="$(blkid -o value -s LABEL "$BACKING_DEV" 2>/dev/null || true)"
@@ -83,6 +93,24 @@ for crit in / /home; do
 done
 info "${BACKING_DEV} carries label '${EXPECT_LABEL}' and backs neither / nor /home"
 info "ZFS pool devices (sdb/sdc) are not referenced by this run"
+
+# Nothing the suite writes may land on the root partition. Stage 4 kills the
+# daemon by design, and a hammer writer that outlives the unmount reopens its
+# path and lands a REAL file in the underlying directory — so every mountpoint
+# has to sit somewhere disposable even when the filesystem under it is gone.
+# Asserted rather than assumed, because the failure is silent until / fills up.
+assert_not_on_root() {
+  local label="$1" path="$2" dev
+  mkdir -p "$path" 2>/dev/null || true
+  dev="$(df --output=source "$path" 2>/dev/null | tail -n1 | tr -d ' ')"
+  if [[ "$dev" == "$ROOT_DEV" ]]; then
+    bad "SAFETY STOP: ${label} (${path}) resolves onto the root device ${ROOT_DEV}."
+    bad "  The suite writes there and stage 4 leaks into it when a mount goes away."
+    bad "  Point it at ${SMARTFS_BACKING_MOUNT} or the pool and re-run."
+    exit 1
+  fi
+  info "${label} on ${dev} — not the root device"
+}
 
 # ── layout ─────────────────────────────────────────────────────────────────
 export SMARTFS_REPO="$REPO"
@@ -126,6 +154,20 @@ command -v cargo >/dev/null || { bad "cargo not on PATH even after adding ${CARG
 mkdir -p "$TMPDIR" "$XFS_LOG_DIR" "$RESULTS_ROOT" "$SMARTFS_STORE_PATH" "$SMARTFS_MOUNT" \
          "$CRASH_MOUNT" "$TEST_MNT" "$SCRATCH_MNT_DIR"
 chmod 1777 "$TMPDIR"
+
+say "nothing writes to the root partition"
+assert_not_on_root "blob store"      "$SMARTFS_STORE_PATH"
+assert_not_on_root "crash mount"     "$CRASH_MOUNT"
+assert_not_on_root "xfs test mount"  "$TEST_MNT"
+assert_not_on_root "xfs scratch mnt" "$SCRATCH_MNT_DIR"
+assert_not_on_root "tmp"             "$TMPDIR"
+assert_not_on_root "results"         "$RESULTS_ROOT"
+assert_not_on_root "daemon logs"     "$XFS_LOG_DIR"
+# SMARTFS_MOUNT is the documented FUSE mountpoint and stays at /mnt/smartfs-test.
+# Writes there travel through FUSE to blobs on the test partition; the only way
+# they could reach / is if the mount were down, and the emptiness check below
+# catches exactly that, loudly, before anything starts.
+info "FUSE mountpoint ${SMARTFS_MOUNT} stays put; emptiness is checked below"
 
 # xfstests' check-smartfs wrapper hardcodes /var/log/smartfs-xfs-*.log, and /
 # has ~6 GB free. Symlinks move that traffic to the pool without touching the
@@ -212,116 +254,196 @@ say "pre-build as ${CALLER} (keeps root from writing into target/)"
 runuser -u "$CALLER" -- env PATH="$PATH" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
   "${REPO}/scripts/build.sh" 2>&1 | tail -4
 
-# ── run the stages ─────────────────────────────────────────────────────────
-chmod +x "${REPO}"/scripts/testing/*.sh
-declare -A EXIT_CODE
-STARTED_AT="$(date -Is)"
+# ── one full pass ──────────────────────────────────────────────────────────
+# Wrapped in a function so --watch can call it again without re-running the
+# environment setup above.
+do_run() {
+  # ── run the stages ─────────────────────────────────────────────────────────
+  chmod +x "${REPO}"/scripts/testing/*.sh
+  local -A EXIT_CODE
+  STARTED_AT="$(date -Is)"
 
-run_stage() {
-  local num="$1" script="$2" label="$3"
-  [[ " $STAGES " == *" $num "* ]] || { info "stage $num not selected, skipping"; return 0; }
-  say "STAGE ${num} — ${label}"
-  local log="${RESULTS_ROOT}/${num}-console.log"
-  info "log: $log"
-  set -o pipefail
-  "${REPO}/scripts/testing/${script}" 2>&1 | tee "$log"
-  local rc=${PIPESTATUS[0]}
-  EXIT_CODE[$num]=$rc
-  if (( rc == 0 )); then
-    printf '%s   STAGE %s: exit 0%s\n' "$C_GRN" "$num" "$C_OFF"
-  else
-    printf '%s   STAGE %s: exit %s%s\n' "$C_RED" "$num" "$rc" "$C_OFF"
+  run_stage() {
+    local num="$1" script="$2" label="$3"
+    [[ " $STAGES " == *" $num "* ]] || { info "stage $num not selected, skipping"; return 0; }
+    say "STAGE ${num} — ${label}"
+    local log="${RESULTS_ROOT}/${num}-console.log"
+    info "log: $log"
+    set -o pipefail
+    "${REPO}/scripts/testing/${script}" 2>&1 | tee "$log"
+    local rc=${PIPESTATUS[0]}
+    EXIT_CODE[$num]=$rc
+    if (( rc == 0 )); then
+      printf '%s   STAGE %s: exit 0%s\n' "$C_GRN" "$num" "$C_OFF"
+    else
+      printf '%s   STAGE %s: exit %s%s\n' "$C_RED" "$num" "$rc" "$C_OFF"
+    fi
+    return $rc
+  }
+
+  run_stage 0 00_preflight_checks.sh "preflight"
+  if [[ " $STAGES " == *" 0 "* && "${EXIT_CODE[0]}" -ne 0 ]]; then
+    say "STOPPED"
+    bad "Preflight failed (exit ${EXIT_CODE[0]}). Per §7.2 nothing below it may run."
+    bad "Read ${RESULTS_ROOT}/0-console.log — it names exactly what was missing."
+    bad "Do NOT work around it: an unmet precondition is the finding, not an obstacle."
+    chown -R "$CALLER:$CALLER" "$RESULTS_ROOT" 2>/dev/null || true
+    return "${EXIT_CODE[0]}"
   fi
-  return $rc
-}
 
-run_stage 0 00_preflight_checks.sh "preflight"
-if [[ " $STAGES " == *" 0 "* && "${EXIT_CODE[0]}" -ne 0 ]]; then
-  say "STOPPED"
-  bad "Preflight failed (exit ${EXIT_CODE[0]}). Per §7.2 nothing below it may run."
-  bad "Read ${RESULTS_ROOT}/0-console.log — it names exactly what was missing."
-  bad "Do NOT work around it: an unmet precondition is the finding, not an obstacle."
-  chown -R "$CALLER:$CALLER" "$RESULTS_ROOT" 2>/dev/null || true
-  exit "${EXIT_CODE[0]}"
-fi
+  # Stages 1-4 are independent of each other; a failure in one does not
+  # invalidate the next, so all of them run and every exit code is recorded.
+  run_stage 1 01_smoke_test.sh                  "smoke test (B-04 probe)"
+  run_stage 2 02_run_pjdfstest.sh               "pjdfstest (POSIX semantics)"
+  run_stage 3 03_setup_check_smartfs_xfstests.sh "xfstests scaffold"
+  run_stage 4 04_crash_consistency_test.sh      "crash consistency"
+  run_stage 5 05_perf_diagnostics.sh            "perf diagnostics (record-only)"
 
-# Stages 1-4 are independent of each other; a failure in one does not
-# invalidate the next, so all of them run and every exit code is recorded.
-run_stage 1 01_smoke_test.sh                  "smoke test (B-04 probe)"
-run_stage 2 02_run_pjdfstest.sh               "pjdfstest (POSIX semantics)"
-run_stage 3 03_setup_check_smartfs_xfstests.sh "xfstests scaffold"
-run_stage 4 04_crash_consistency_test.sh      "crash consistency"
-run_stage 5 05_perf_diagnostics.sh            "perf diagnostics (record-only)"
+  # ── optional: the multi-hour generic/ run ──────────────────────────────────
+  if (( RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
+    say "xfstests generic/ — this takes hours"
+    ( cd "${REPO}/third_party/xfstests" && ./check-smartfs -g generic ) \
+      2>&1 | tee "${RESULTS_ROOT}/3-generic-run.log"
+    EXIT_CODE[3g]=${PIPESTATUS[0]}
+  fi
 
-# ── optional: the multi-hour generic/ run ──────────────────────────────────
-if (( RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
-  say "xfstests generic/ — this takes hours"
-  ( cd "${REPO}/third_party/xfstests" && ./check-smartfs -g generic ) \
-    2>&1 | tee "${RESULTS_ROOT}/3-generic-run.log"
-  EXIT_CODE[3g]=${PIPESTATUS[0]}
-fi
+  # ── manifest ───────────────────────────────────────────────────────────────
+  say "writing run manifest"
+  MANIFEST="${RESULTS_ROOT}/RUN-MANIFEST.txt"
+  {
+    echo "The Great SmartFS Test — run manifest"
+    echo "started            : ${STARTED_AT}"
+    echo "finished           : $(date -Is)"
+    echo "host               : $(uname -srm)  $(hostname)"
+    echo "invoked by         : ${CALLER}"
+    echo "repo commit        : $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "repo dirty         : $(git -C "$REPO" status --porcelain 2>/dev/null | wc -l) file(s)"
+    echo "smartfsd version   : $("${REPO}/target/debug/smartfsd" --version 2>/dev/null || echo 'not built')"
+    echo "backing device     : ${SMARTFS_BACKING_DEV} (label ${EXPECT_LABEL})"
+    echo "free on sda3       : $(df -h "$SMARTFS_BACKING_MOUNT" | awk 'NR==2{print $4}')"
+    echo "free on /          : $(df -h / | awk 'NR==2{print $4}')"
+    echo "PG_CONTAINER       : ${PG_CONTAINER}  (K12 enabled)"
+    echo "crash mount        : ${CRASH_MOUNT}"
+    echo "harness digest     : ${HARNESS_NOW}  (${HARNESS_STATUS})"
+    echo "STOCHASTIC_ROUNDS  : ${STOCHASTIC_ROUNDS}$( (( STOCHASTIC_ROUNDS < 25 )) && echo '   *** BELOW the plan figure of 25 — REDUCED COVERAGE ***')"
+    echo "crash instrumentation: $("${REPO}/target/debug/smartfsd" --crash-points >/dev/null 2>&1 && echo 'present' || echo 'ABSENT (Stage 0b not implemented; Stage 4 stochastic-only by design)')"
+    echo
+    echo "stage exit codes (0 = pass, anything else = FAIL):"
+    for k in 0 1 2 3 4 5 3g; do
+      [[ -v EXIT_CODE[$k] ]] && printf '  stage %-3s : %s\n' "$k" "${EXIT_CODE[$k]}"
+    done
+    echo
+    echo "Known-expected failures for this build, per docs/testing/the-great-smartfs-test.md:"
+    echo "  stage 1 — smartfs-mcp has no [[bin]], so the B-04 probe dies before reaching a"
+    echo "            verdict. Outcome is UNREACHABLE, not CONFIRMED (see plan section 1.1)."
+    echo "  stage 4 — Stage 0b was deliberately not implemented, so K1-K11 are reported as a"
+    echo "            coverage gap and only the stochastic phase runs. That is the designed"
+    echo "            loud behaviour, not a malfunction."
+  } > "$MANIFEST"
+  cat "$MANIFEST"
 
-# ── manifest ───────────────────────────────────────────────────────────────
-say "writing run manifest"
-MANIFEST="${RESULTS_ROOT}/RUN-MANIFEST.txt"
-{
-  echo "The Great SmartFS Test — run manifest"
-  echo "started            : ${STARTED_AT}"
-  echo "finished           : $(date -Is)"
-  echo "host               : $(uname -srm)  $(hostname)"
-  echo "invoked by         : ${CALLER}"
-  echo "repo commit        : $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  echo "repo dirty         : $(git -C "$REPO" status --porcelain 2>/dev/null | wc -l) file(s)"
-  echo "smartfsd version   : $("${REPO}/target/debug/smartfsd" --version 2>/dev/null || echo 'not built')"
-  echo "backing device     : ${SMARTFS_BACKING_DEV} (label ${EXPECT_LABEL})"
-  echo "free on sda3       : $(df -h "$SMARTFS_BACKING_MOUNT" | awk 'NR==2{print $4}')"
-  echo "free on /          : $(df -h / | awk 'NR==2{print $4}')"
-  echo "PG_CONTAINER       : ${PG_CONTAINER}  (K12 enabled)"
-  echo "crash mount        : ${CRASH_MOUNT}"
-  echo "harness digest     : ${HARNESS_NOW}  (${HARNESS_STATUS})"
-  echo "STOCHASTIC_ROUNDS  : ${STOCHASTIC_ROUNDS}$( (( STOCHASTIC_ROUNDS < 25 )) && echo '   *** BELOW the plan figure of 25 — REDUCED COVERAGE ***')"
-  echo "crash instrumentation: $("${REPO}/target/debug/smartfsd" --crash-points >/dev/null 2>&1 && echo 'present' || echo 'ABSENT (Stage 0b not implemented; Stage 4 stochastic-only by design)')"
-  echo
-  echo "stage exit codes (0 = pass, anything else = FAIL):"
+  # ── hand everything back ───────────────────────────────────────────────────
+  say "returning file ownership to ${CALLER}"
+  for d in "${REPO}/target" "${REPO}/third_party" "$RESULTS_ROOT" "$CARGO_HOME"; do
+    [[ -e "$d" ]] && chown -R "$CALLER:$CALLER" "$d" 2>/dev/null || true
+  done
+  info "done"
+
+  say "SUMMARY (iteration ${ITERATION})"
+  FAILED=0
   for k in 0 1 2 3 4 5 3g; do
-    [[ -v EXIT_CODE[$k] ]] && printf '  stage %-3s : %s\n' "$k" "${EXIT_CODE[$k]}"
+    if [[ -v EXIT_CODE[$k] ]]; then
+      if (( ${EXIT_CODE[$k]} == 0 )); then
+        printf '%s  stage %-3s PASS%s\n' "$C_GRN" "$k" "$C_OFF"
+      else
+        printf '%s  stage %-3s FAIL (exit %s)%s\n' "$C_RED" "$k" "${EXIT_CODE[$k]}" "$C_OFF"
+        FAILED=1
+      fi
+    fi
   done
   echo
-  echo "Known-expected failures for this build, per docs/testing/the-great-smartfs-test.md:"
-  echo "  stage 1 — smartfs-mcp has no [[bin]], so the B-04 probe dies before reaching a"
-  echo "            verdict. Outcome is UNREACHABLE, not CONFIRMED (see plan section 1.1)."
-  echo "  stage 4 — Stage 0b was deliberately not implemented, so K1-K11 are reported as a"
-  echo "            coverage gap and only the stochastic phase runs. That is the designed"
-  echo "            loud behaviour, not a malfunction."
-} > "$MANIFEST"
-cat "$MANIFEST"
-
-# ── hand everything back ───────────────────────────────────────────────────
-say "returning file ownership to ${CALLER}"
-for d in "${REPO}/target" "${REPO}/third_party" "$RESULTS_ROOT" "$CARGO_HOME"; do
-  [[ -e "$d" ]] && chown -R "$CALLER:$CALLER" "$d" 2>/dev/null || true
-done
-info "done"
-
-say "SUMMARY"
-FAILED=0
-for k in 0 1 2 3 4 5 3g; do
-  if [[ -v EXIT_CODE[$k] ]]; then
-    if (( ${EXIT_CODE[$k]} == 0 )); then
-      printf '%s  stage %-3s PASS%s\n' "$C_GRN" "$k" "$C_OFF"
-    else
-      printf '%s  stage %-3s FAIL (exit %s)%s\n' "$C_RED" "$k" "${EXIT_CODE[$k]}" "$C_OFF"
-      FAILED=1
-    fi
+  info "artifacts: ${RESULTS_ROOT}"
+  info "manifest : ${MANIFEST}"
+  if (( ! RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
+    echo
+    info "Stage 3 only scaffolded. The actual suite is hours and was not run:"
+    info "  cd ${REPO}/third_party/xfstests && sudo ./check-smartfs -g generic"
+    info "  (or re-run this script with --with-xfstests-run)"
   fi
-done
-echo
-info "artifacts: ${RESULTS_ROOT}"
-info "manifest : ${MANIFEST}"
-if (( ! RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
-  echo
-  info "Stage 3 only scaffolded. The actual suite is hours and was not run:"
-  info "  cd ${REPO}/third_party/xfstests && sudo ./check-smartfs -g generic"
-  info "  (or re-run this script with --with-xfstests-run)"
+  return $FAILED
+}
+
+# ── control channel for --watch ────────────────────────────────────────────
+# The point: you start this once with sudo, and afterwards it re-runs on a file
+# appearing — so an unprivileged agent can drive iteration without ever holding
+# root itself.
+#
+# The interface is deliberately two files and nothing else. A control file whose
+# *contents* were executed would be a root shell by proxy dressed up as
+# automation; "re-run the committed suite" and "stop" are auditable, and the
+# only thing that changes between iterations is code in git.
+CONTROL_DIR="${RESULTS_ROOT}/_control"
+TRIGGER="${CONTROL_DIR}/run"
+STOPFILE="${CONTROL_DIR}/stop"
+STATUS="${CONTROL_DIR}/STATUS"
+
+control_setup() {
+  mkdir -p "$CONTROL_DIR"
+  rm -f "$TRIGGER" "$STOPFILE"
+  chown -R "$CALLER:$CALLER" "$CONTROL_DIR" 2>/dev/null || true
+}
+
+set_status() {
+  printf '%s  %s\n' "$(date -Is)" "$*" > "$STATUS" 2>/dev/null || true
+  chown "$CALLER:$CALLER" "$STATUS" 2>/dev/null || true
+}
+
+# Blocks until the trigger or stop file shows up. Returns 1 to end the watch.
+await_trigger() {
+  local waited=0
+  say "WAITING — iteration ${ITERATION} finished, holding root and idling"
+  info "re-run :  touch ${TRIGGER}"
+  info "stop   :  touch ${STOPFILE}"
+  info "status :  ${STATUS}"
+  info "budget :  ${WATCH_TIMEOUT}s of idling before this exits on its own"
+  set_status "idle after iteration ${ITERATION}; touch ${TRIGGER} to re-run"
+
+  while (( waited < WATCH_TIMEOUT )); do
+    if [[ -e "$STOPFILE" ]]; then
+      rm -f "$STOPFILE"
+      say "stop file seen — releasing root and exiting"
+      return 1
+    fi
+    if [[ -e "$TRIGGER" ]]; then
+      rm -f "$TRIGGER"
+      say "trigger seen — starting iteration $(( ITERATION + 1 ))"
+      return 0
+    fi
+    sleep 2
+    waited=$(( waited + 2 ))
+  done
+  say "idle budget of ${WATCH_TIMEOUT}s expired — releasing root and exiting"
+  set_status "exited: idle timeout"
+  return 1
+}
+
+ITERATION=1
+LAST_RC=0
+if (( WATCH )); then
+  control_setup
 fi
-exit $FAILED
+
+while true; do
+  set_status "running iteration ${ITERATION}"
+  do_run
+  LAST_RC=$?
+  cp -f "${RESULTS_ROOT}/RUN-MANIFEST.txt" "${CONTROL_DIR}/LAST-RUN.txt" 2>/dev/null || true
+  chown -R "$CALLER:$CALLER" "$RESULTS_ROOT" 2>/dev/null || true
+
+  (( WATCH )) || break
+  await_trigger || break
+  ITERATION=$(( ITERATION + 1 ))
+done
+
+set_status "exited with ${LAST_RC}"
+exit $LAST_RC
