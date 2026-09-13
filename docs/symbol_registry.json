@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T02:38:19.013595212Z",
+  "generated_at": "2026-09-13T05:23:12.316538552Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -1977,7 +1977,7 @@
       "kind": "Function",
       "name": "cache_ino_mapping",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 330,
+      "last_known_line": 355,
       "doc_summary": "Caches the mapping between FUSE `ino` and database UUID.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1988,7 +1988,7 @@
       "kind": "Function",
       "name": "close_handle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 272,
+      "last_known_line": 297,
       "doc_summary": "Close a file handle, decrementing `open_fd_count`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2076,7 +2076,7 @@
       "kind": "Function",
       "name": "get_cached_id",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 337,
+      "last_known_line": 362,
       "doc_summary": "Looks up a cached database UUID for the given FUSE `ino`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2109,7 +2109,7 @@
       "kind": "Function",
       "name": "is_marked_for_deletion",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 313,
+      "last_known_line": 338,
       "doc_summary": "Checks whether an inode is marked for deletion.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2131,7 +2131,7 @@
       "kind": "Function",
       "name": "mark_for_deletion",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 299,
+      "last_known_line": 324,
       "doc_summary": "Mark an inode for deletion upon unlink or rmdir.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2186,7 +2186,7 @@
       "kind": "Function",
       "name": "open_fd_count",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 323,
+      "last_known_line": 348,
       "doc_summary": "Returns the number of open file descriptors for the given inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2307,7 +2307,7 @@
       "kind": "Function",
       "name": "store_ast_nodes",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 261,
+      "last_known_line": 286,
       "doc_summary": "Store AST nodes in per-fd state (extracted during `flush()`).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2351,8 +2351,19 @@
       "kind": "Function",
       "name": "truncate_handle_committed",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 249,
+      "last_known_line": 274,
       "doc_summary": "Updates a specific open handle with newly committed truncated data, setting modified=false.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "4122d20e-6f5e-4c9f-86f2-bb6c12d26458",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "truncate_inode_handles",
+      "last_known_file": "crates/smartfs-fuse/src/state.rs",
+      "last_known_line": 237,
+      "doc_summary": "Truncate or resize the per-fd memory buffer for all open handles of an inode without committing.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -2362,8 +2373,19 @@
       "kind": "Function",
       "name": "truncate_inode_handles_committed",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 237,
+      "last_known_line": 262,
       "doc_summary": "Updates all open handles for an inode with newly committed truncated data, setting modified=false.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "7162986c-7e61-4560-84a2-19e344e7c381",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "truncate_inode_handles_with_data",
+      "last_known_file": "crates/smartfs-fuse/src/state.rs",
+      "last_known_line": 250,
+      "doc_summary": "Sets the per-fd memory buffer for all open handles of an inode to `data`, marking modified=true.",
       "tombstoned": false,
       "tombstoned_reason": null
     },

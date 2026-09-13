@@ -232,6 +232,31 @@ impl FuseStateManager {
         Ok(())
     }
 
+    /// @id: 4122d20e-6f5e-4c9f-86f2-bb6c12d26458
+    /// Truncate or resize the per-fd memory buffer for all open handles of an inode without committing.
+    pub fn truncate_inode_handles(&self, inode_id: Uuid, new_size: usize) {
+        let mut handles = self.handles.write().expect("handles lock poisoned");
+        for handle in handles.values_mut() {
+            if handle.inode_id == inode_id {
+                let buffer = handle.buffer.get_or_insert_with(Vec::new);
+                buffer.resize(new_size, 0);
+                handle.modified = true;
+            }
+        }
+    }
+
+    /// @id: 7162986c-7e61-4560-84a2-19e344e7c381
+    /// Sets the per-fd memory buffer for all open handles of an inode to `data`, marking modified=true.
+    pub fn truncate_inode_handles_with_data(&self, inode_id: Uuid, data: Vec<u8>) {
+        let mut handles = self.handles.write().expect("handles lock poisoned");
+        for handle in handles.values_mut() {
+            if handle.inode_id == inode_id {
+                handle.buffer = Some(data.clone());
+                handle.modified = true;
+            }
+        }
+    }
+
     /// @id: 5c03b4c5-d6e7-4f80-91a2-b3c4d5e6f709
     /// Updates all open handles for an inode with newly committed truncated data, setting modified=false.
     pub fn truncate_inode_handles_committed(&self, inode_id: Uuid, data: &[u8]) {

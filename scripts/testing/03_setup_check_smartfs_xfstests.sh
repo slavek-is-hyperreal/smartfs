@@ -105,9 +105,14 @@ apply_migrations() {
   done
 }
 for db in "$TEST_DB" "$SCRATCH_DB"; do
-  psql_q "CREATE EXTENSION IF NOT EXISTS vector" "${PG_BASE}/${db}" >/dev/null || true
-  apply_migrations "${PG_BASE}/${db}"
-  pass "migrations 001-006 applied to ${db}"
+  tables="$(psql_q "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'" "${PG_BASE}/${db}")"
+  if (( tables == 0 )); then
+    psql_q "CREATE EXTENSION IF NOT EXISTS vector" "${PG_BASE}/${db}" >/dev/null || true
+    apply_migrations "${PG_BASE}/${db}"
+    pass "migrations 001-006 applied to ${db}"
+  else
+    pass "database ${db} already initialized with schema (${tables} tables present)"
+  fi
 done
 
 # ── local.config ────────────────────────────────────────────────────────────

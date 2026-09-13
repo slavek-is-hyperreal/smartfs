@@ -138,6 +138,7 @@ start_daemon() {
        library crate with no main.rs and no [[bin]]; nothing in this workspace
        can mount SmartFS until smartfsd exists."
 
+  DAEMON_MOUNT="$mp"
   DAEMON_READY_FILE="$(mktemp -u "${TMPDIR:-/tmp}/smartfsd-ready.XXXXXX")"
   local logf="${RESULTS_ROOT}/${_STAGE_NAME}/smartfsd.log"
   mkdir -p "$(dirname "$logf")"
@@ -176,7 +177,11 @@ stop_daemon() {
   DAEMON_PID=""
   [[ -n "$DAEMON_READY_FILE" ]] && rm -f "$DAEMON_READY_FILE"
   # AutoUnmount should handle this; be certain anyway (lazy unmount clears broken endpoints).
-  fusermount -u -z "$SMARTFS_MOUNT" 2>/dev/null || umount -l "$SMARTFS_MOUNT" 2>/dev/null || true
+  local active_mp="${DAEMON_MOUNT:-$SMARTFS_MOUNT}"
+  fusermount -u -z "$active_mp" 2>/dev/null || umount -l "$active_mp" 2>/dev/null || true
+  if [[ "$active_mp" != "$SMARTFS_MOUNT" ]]; then
+    fusermount -u -z "$SMARTFS_MOUNT" 2>/dev/null || umount -l "$SMARTFS_MOUNT" 2>/dev/null || true
+  fi
   return 0
 }
 

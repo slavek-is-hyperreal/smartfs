@@ -237,6 +237,7 @@ impl Filesystem for SmartFsFuse {
         let pool = self.pool.clone();
         let store = self.store.clone();
         let state = self.state.clone();
+        let state_inner = state.clone();
         let pending = self.pending.clone();
 
         let res: Result<(smartfs_db::InodeRecord, Option<Vec<u8>>)> = self.block_on(async move {
@@ -247,14 +248,39 @@ impl Filesystem for SmartFsFuse {
             let mut truncated_data = None;
 
             if let Some(new_size) = size {
-                let current_size = match pending.view_of(record.id) {
-                    Some(view) => view.size as u64,
-                    None => record.size as u64,
-                };
+                let has_open_handles = fh.is_some() || state_inner.open_fd_count(record.id) > 0;
+                if has_open_handles {
+                    // Architecture §11.2a: setattr with FATTR_SIZE on open file does NOT commit a version.
+                    // It only truncates the per-fd memory buffer. The version is created in release().
+                    if new_size == 0 {
+                        if let Some(h_id) = fh {
+                            let _ = state_inner.truncate_handle(h_id, 0);
+                        } else {
+                            state_inner.truncate_inode_handles(record.id, 0);
+                        }
+                    } else {
+                        let blob = match pending.view_of(record.id) {
+                            Some(view) => view.blob_id,
+                            None => record.current_blob_id,
+                        };
+                        let mut orig = if let Some(blob_id) = blob {
+                            let comp = store.get(blob_id, None).await?;
+                            smartfs_compress::decompress(&comp).unwrap_or(comp)
+                        } else {
+                            Vec::new()
+                        };
+                        orig.resize(new_size as usize, 0);
+                        state_inner.truncate_inode_handles_with_data(record.id, orig);
+                    }
+                } else {
+                    let current_size = match pending.view_of(record.id) {
+                        Some(view) => view.size as u64,
+                        None => record.size as u64,
+                    };
 
-                // Root Invariant #2: Every content change creates a new file_versions row (CoW).
-                // Truncate alters file content and must commit the truncated blob to pending pipeline.
-                if new_size != current_size || record.current_blob_id.is_none() {
+                    // Root Invariant #2: Standalone truncate (no open file descriptors) alters file content
+                    // and must commit the truncated blob to pending pipeline.
+                    if new_size != current_size || record.current_blob_id.is_none() {
                     let data = if new_size == 0 {
                         Vec::new()
                     } else {
@@ -349,6 +375,7 @@ impl Filesystem for SmartFsFuse {
                     truncated_data = Some(data);
                 }
             }
+        }
 
             let updated = smartfs_db::inode_update_attrs(
                 &pool,

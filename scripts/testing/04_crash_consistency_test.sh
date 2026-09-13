@@ -102,6 +102,7 @@ reset_scratch() {
     psql "$CRASH_URL" -qX -v ON_ERROR_STOP=1 -f "$m" >>"${RES}/migrate.log" 2>&1 \
       || die "migration $(basename "$m") failed on the scratch database"
   done
+  fusermount -u -z "$CRASH_MOUNT" 2>/dev/null || umount -l "$CRASH_MOUNT" 2>/dev/null || true
   rm -rf "${CRASH_STORE:?}"; mkdir -p "$CRASH_STORE" "$CRASH_MOUNT"
 }
 
