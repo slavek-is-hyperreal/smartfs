@@ -6,10 +6,10 @@
 smartfs/
 ├── crates/
 │   ├── smartfs-schema/     ← bez zmian w v6.0
-│   ├── smartfs-store/      ← bez zmian w v6.0
+│   ├── smartfs-store/      ← delta: kolejka pending/ + scrub, patrz ADR-58
 │   ├── smartfs-db/         ← delta: kolumna consolidated, patrz niżej
 │   ├── smartfs-compress/   ← bez zmian w v6.0
-│   ├── smartfs-fuse/       ← bez zmian w v6.0
+│   ├── smartfs-fuse/       ← delta: dwuetapowy release(), patrz ADR-58
 │   ├── smartfs-ai/         ← delta: domyślny model Qwen, patrz ADR-49
 │   ├── smartfs-semantic/   ← NOWY — serce v6.0
 │   ├── smartfs-mcp/        ← delta: nowe narzędzie search_by_concept
@@ -48,13 +48,13 @@ Crate'y bez zmian merytorycznych w v6.0 mają dokumentację niezmienioną wzglę
 smartfs-schema   ← importowany przez wszystkich, nie importuje nikogo
 smartfs-store    ← importuje: smartfs-schema
 smartfs-compress ← importuje: smartfs-schema, smartfs-store
-smartfs-db       ← importuje: smartfs-schema
+smartfs-db       ← importuje: smartfs-schema, smartfs-store   (od ADR-58: replay znaczników pending)
 smartfs-ai       ← importuje: smartfs-schema, smartfs-db, smartfs-store
 smartfs-semantic ← importuje: smartfs-schema, smartfs-db          (NIGDY smartfs-ai — patrz niżej)
 smartfs-fuse     ← importuje: smartfs-schema, smartfs-db, smartfs-store, smartfs-compress
 smartfs-mcp      ← importuje: smartfs-schema, smartfs-db, smartfs-semantic
 smartfs-ipfs     ← importuje: smartfs-schema, smartfs-store
-smartfs-cli      ← importuje: smartfs-schema, smartfs-db, smartfs-semantic
+smartfs-cli      ← importuje: smartfs-schema, smartfs-db, smartfs-semantic, smartfs-store, smartfs-compress
 smartfs-docgen   ← samodzielny dev-tool, importuje tylko tree-sitter-rust; NIE importuje żadnego innego crate'a smartfs, bo skanuje ich pliki źródłowe jako tekst, nie linkuje się z nimi
 ```
 

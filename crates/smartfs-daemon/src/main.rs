@@ -63,6 +63,7 @@ trait GateExt<T> {
     fn gate(self, code: i32) -> std::result::Result<T, Fatal>;
 }
 
+/// @id: c42e9d89-3666-4059-8879-943d064bdcbe
 impl<T> GateExt<T> for Result<T> {
     fn gate(self, code: i32) -> std::result::Result<T, Fatal> {
         self.map_err(|err| Fatal { code, err })
@@ -80,6 +81,7 @@ enum Semantic {
     Off,
 }
 
+/// @id: bae59b34-bdb3-4e9e-a745-f88b45ba3cef
 impl Semantic {
     fn as_str(&self) -> &'static str {
         match self {

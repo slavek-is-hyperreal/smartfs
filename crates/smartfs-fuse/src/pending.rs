@@ -148,6 +148,7 @@ struct Gate {
     notify: Notify,
 }
 
+/// @id: da1f7fff-2663-4931-888b-9a3046fd0e22
 impl Gate {
     fn new(max: usize, seeded: usize) -> Self {
         Self {

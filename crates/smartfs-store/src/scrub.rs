@@ -112,6 +112,7 @@ pub struct ScrubPacing {
     pub pause_between: Duration,
 }
 
+/// @id: 6854ad1f-3b01-4d67-b1d4-2bec09b6260d
 impl Default for ScrubPacing {
     fn default() -> Self {
         Self {
@@ -195,7 +196,7 @@ where
     Ok(report)
 }
 
-/// @id: 6b2f43e7-9514-4c15-93da-1dff5ce0d343
+/// @id: 22245ac2-2b3d-41f3-b537-425ee1e066be
 /// Counts blob files no expectation mentions.
 ///
 /// Only the store root itself, never `pending/` — those are queue markers, not
