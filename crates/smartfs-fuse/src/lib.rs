@@ -16,7 +16,7 @@ pub mod syntax;
 pub use error::error_to_errno;
 pub use fs::{SmartFsFuse, TTL};
 pub use mount::{default_mount_options, mount_smartfs, spawn_mount_smartfs};
-pub use pending::{commit_one, PendingLimits, PendingPipeline};
+pub use pending::{commit_one, PendingLimits, PendingPipeline, PendingView};
 pub use state::{
     inode_to_file_attr, system_time_from_datetime, FuseStateManager, InodeState, OpenHandle,
 };

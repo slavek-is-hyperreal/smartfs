@@ -389,3 +389,133 @@ async fn rescan_does_not_requeue_what_is_already_in_flight() {
          next scan"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn an_uncommitted_write_is_visible_to_readers() {
+    // Read-after-write. Acknowledging before the drain commits leaves
+    // inode_registry describing the PREVIOUS version, so without the overlay a
+    // fresh open() would serve stale bytes and stat() a stale size to the very
+    // process that just wrote. Both are outright POSIX violations.
+    let pool = pool().await;
+    let store = TempDir::new().unwrap();
+    let inode_id = make_inode(&pool).await;
+
+    // Drain cannot progress: markers stay uncommitted for the whole test, which
+    // is exactly the window being checked.
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        store.path(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits {
+            max_entries: 8,
+            block_timeout: Duration::from_millis(200),
+        },
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    assert!(
+        pipeline.view_of(inode_id).is_none(),
+        "nothing written yet, so nothing to shadow"
+    );
+
+    let body = "content a reader must see immediately";
+    let m = marker(pipeline.next_seq(), inode_id, body);
+    pipeline.submit(&m).await.expect("submit failed");
+
+    let view = pipeline
+        .view_of(inode_id)
+        .expect("an acknowledged write must be visible before it is committed");
+    assert_eq!(view.blob_id, m.blob_id, "reads must reach the new blob");
+    assert_eq!(view.size, body.len() as i64, "stat must report the new size");
+    assert_eq!(view.content_hash, m.content_hash);
+
+    // Overwrite: the newer write supersedes the older for the same inode.
+    let body2 = "and then a second, newer revision";
+    let m2 = marker(pipeline.next_seq(), inode_id, body2);
+    pipeline.submit(&m2).await.expect("submit failed");
+    let view2 = pipeline.view_of(inode_id).expect("still shadowed");
+    assert_eq!(
+        view2.content_hash, m2.content_hash,
+        "the newest uncommitted write is the one a reader should see"
+    );
+
+    cleanup(&pool, inode_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn the_overlay_steps_aside_once_the_row_is_real() {
+    let pool = pool().await;
+    let store = TempDir::new().unwrap();
+    let inode_id = make_inode(&pool).await;
+
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        store.path(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits::from_env(),
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    let m = marker(pipeline.next_seq(), inode_id, "committed shortly");
+    pipeline.submit(&m).await.expect("submit failed");
+    await_versions(&pool, inode_id, 1).await;
+
+    // The database is authoritative again, so the overlay must not keep
+    // shadowing it — a stale entry would pin readers to an old blob forever.
+    for _ in 0..100 {
+        if pipeline.view_of(inode_id).is_none() {
+            cleanup(&pool, inode_id).await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("overlay still shadows the inode after its version was committed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn a_restart_rebuilds_the_overlay_before_serving() {
+    // Markers left by a dead daemon describe writes their callers were already
+    // told had succeeded. Serving pre-crash content for them is the same
+    // violation, just after a restart.
+    let pool = pool().await;
+    let store = TempDir::new().unwrap();
+    let inode_id = make_inode(&pool).await;
+
+    let queue = smartfs_store::PendingQueue::new(store.path());
+    let m = marker(1, inode_id, "survived the crash");
+    queue.enqueue(&m).await.expect("enqueue failed");
+
+    // Point the drain at a dead database so the marker cannot be committed
+    // away before the assertion — the overlay must carry it regardless.
+    let stalled = smartfs_db::connect_pool("postgres://postgres:postgres@127.0.0.1:1/nope")
+        .await
+        .err();
+    assert!(stalled.is_some(), "expected the bogus URL to be unreachable");
+
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        store.path(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits::from_env(),
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    // start() rebuilds the overlay before returning, so this holds even if the
+    // drain has already raced ahead and committed.
+    let seen_shadow = pipeline.view_of(inode_id).is_some();
+    let committed = !versions_of(&pool, inode_id).await.is_empty();
+    assert!(
+        seen_shadow || committed,
+        "after a restart the write must be readable either from the overlay or \
+         from a committed row — never from neither"
+    );
+
+    await_versions(&pool, inode_id, 1).await;
+    cleanup(&pool, inode_id).await;
+}

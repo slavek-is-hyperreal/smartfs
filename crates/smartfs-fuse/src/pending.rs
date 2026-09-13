@@ -21,7 +21,7 @@
 //! been acknowledged — reserving later would mean refusing a write we had
 //! already promised to keep.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,6 +31,7 @@ use smartfs_db::PgPool;
 use smartfs_schema::error::{Result, SmartFsError};
 use smartfs_schema::PendingMarker;
 use smartfs_store::PendingQueue;
+use uuid::Uuid;
 use tokio::sync::{mpsc, Notify};
 
 /// Reads the periodic scan interval, once.
@@ -134,6 +135,64 @@ pub fn read_total_ram_bytes() -> u64 {
         .unwrap_or(FALLBACK)
 }
 
+/// @id: a4f6eb30-db3a-4304-a3be-54dc0dff9ad8
+/// What an uncommitted write already looks like to a reader.
+///
+/// Published the moment a marker becomes durable and withdrawn when its row
+/// lands, so the window in which the database is behind is never observable
+/// through the mount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingView {
+    /// Blob holding the new content. Readers fetch this instead of
+    /// `inode_registry.current_blob_id`.
+    pub blob_id: Option<Uuid>,
+    /// Plaintext length, so `stat` reports the size just written.
+    pub size: i64,
+    /// SHA-256 of the plaintext, for callers verifying what they will get.
+    pub content_hash: String,
+    /// Marker this view came from, so the drain withdraws the right one.
+    pub file_name: String,
+}
+
+/// @id: 45c003de-02c6-435d-ba71-a293c6b7d3e9
+/// Read-through overlay of writes acknowledged but not yet committed.
+///
+/// Keyed by inode and holding only the newest uncommitted write per inode:
+/// consecutive overwrites of one file each supersede the last, which is exactly
+/// what a reader should see. Withdrawal is keyed by marker filename so a stale
+/// drain result cannot retract a newer write that arrived meanwhile.
+#[derive(Debug, Default)]
+struct PendingOverlay {
+    by_inode: Mutex<HashMap<Uuid, PendingView>>,
+}
+
+/// @id: 51a244ad-963c-4bc4-8fea-efee83c9faa5
+impl PendingOverlay {
+    fn publish(&self, inode_id: Uuid, view: PendingView) {
+        if let Ok(mut map) = self.by_inode.lock() {
+            map.insert(inode_id, view);
+        }
+    }
+
+    fn get(&self, inode_id: Uuid) -> Option<PendingView> {
+        self.by_inode.lock().ok()?.get(&inode_id).cloned()
+    }
+
+    /// Removes the entry only if it still refers to `file_name`. A later write
+    /// to the same inode must survive an earlier marker finishing its commit.
+    fn withdraw(&self, inode_id: Uuid, file_name: &str) {
+        if let Ok(mut map) = self.by_inode.lock() {
+            if map.get(&inode_id).is_some_and(|v| v.file_name == file_name) {
+                map.remove(&inode_id);
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.by_inode.lock().map(|m| m.len()).unwrap_or(0)
+    }
+}
+
 /// @id: 2f7c1d68-5b93-4a20-8e64-c1d0f3a75b28
 /// Bounds writes accepted but not yet checkpointed (decision points 5 and 6).
 ///
@@ -217,6 +276,7 @@ pub struct PendingPipeline {
     tx: mpsc::UnboundedSender<String>,
     seq: Arc<AtomicU64>,
     gate: Arc<Gate>,
+    overlay: Arc<PendingOverlay>,
     /// Markers handed to the drain and not yet finished with.
     ///
     /// Without this the periodic scan would re-send every queued marker on
@@ -263,12 +323,22 @@ impl PendingPipeline {
         let (tx, rx) = mpsc::unbounded_channel::<String>();
 
         let inflight = Arc::new(Mutex::new(HashSet::new()));
+        let overlay = Arc::new(PendingOverlay::default());
 
         let drain_queue = queue.clone();
         let drain_gate = Arc::clone(&gate);
         let drain_inflight = Arc::clone(&inflight);
+        let drain_overlay = Arc::clone(&overlay);
         rt.spawn(async move {
-            drain_loop(pool, drain_queue, drain_gate, drain_inflight, rx).await
+            drain_loop(
+                pool,
+                drain_queue,
+                drain_gate,
+                drain_inflight,
+                drain_overlay,
+                rx,
+            )
+            .await
         });
 
         let pipeline = Self {
@@ -276,9 +346,15 @@ impl PendingPipeline {
             tx,
             seq: Arc::new(AtomicU64::new(highest + 1)),
             gate,
+            overlay,
             inflight,
             limits,
         };
+
+        // Rebuild the overlay from disk before anything can read, so a restart
+        // with a backlog does not serve the pre-crash content of files whose
+        // writes were already acknowledged.
+        pipeline.rebuild_overlay(&queued).await?;
 
         // Decision point 4, first half: the startup scan is mandatory, and it
         // runs before this function returns so the daemon cannot declare
@@ -368,6 +444,19 @@ impl PendingPipeline {
             return Err(e);
         }
 
+        // Durable now, so readers must see it. Published before the drain is
+        // told about it: the other order leaves a window where the row is
+        // already committed and withdrawn while the overlay still lacks it.
+        self.overlay.publish(
+            marker.inode_id,
+            PendingView {
+                blob_id: marker.blob_id,
+                size: marker.size,
+                content_hash: marker.content_hash.clone(),
+                file_name: file_name.clone(),
+            },
+        );
+
         self.mark_inflight(file_name.clone());
         if self.tx.send(file_name.clone()).is_err() {
             self.clear_inflight(&file_name);
@@ -378,6 +467,54 @@ impl PendingPipeline {
             return Err(SmartFsError::Store(
                 "pending drain is not running; write is durable but uncommitted".to_string(),
             ));
+        }
+        Ok(())
+    }
+
+    /// @id: fe5886be-9f14-4b15-b473-495b13742fbe
+    /// The newest uncommitted write for `inode_id`, if there is one.
+    ///
+    /// The read and getattr paths call this before falling back to
+    /// `inode_registry`, which is what keeps read-after-write intact across the
+    /// window between acknowledgement and commit.
+    pub fn view_of(&self, inode_id: Uuid) -> Option<PendingView> {
+        self.overlay.get(inode_id)
+    }
+
+    /// @id: c5bbe7db-1633-48e5-8e2d-41b13791e7be
+    /// Inodes currently shadowed by an uncommitted write.
+    pub fn overlay_depth(&self) -> usize {
+        self.overlay.len()
+    }
+
+    /// @id: de72cbdc-9f27-4c16-9db5-5c8c6f6b1b46
+    /// Repopulates the overlay from markers already on disk.
+    ///
+    /// Runs during `start`, before the daemon can serve anything: markers left
+    /// by a previous run describe writes their callers were already told had
+    /// succeeded, so serving the pre-crash content for them would be the same
+    /// violation the overlay exists to prevent.
+    ///
+    /// `names` is FIFO-ordered, so later markers overwrite earlier ones per
+    /// inode and the newest write wins.
+    async fn rebuild_overlay(&self, names: &[String]) -> Result<()> {
+        let mut restored = 0usize;
+        for name in names {
+            if let Some(marker) = self.queue.read(name).await? {
+                self.overlay.publish(
+                    marker.inode_id,
+                    PendingView {
+                        blob_id: marker.blob_id,
+                        size: marker.size,
+                        content_hash: marker.content_hash,
+                        file_name: name.clone(),
+                    },
+                );
+                restored += 1;
+            }
+        }
+        if restored > 0 {
+            tracing::info!(restored, "rebuilt the pending read overlay from disk");
         }
         Ok(())
     }
@@ -457,9 +594,19 @@ async fn drain_loop(
     queue: PendingQueue,
     gate: Arc<Gate>,
     inflight: Arc<Mutex<HashSet<String>>>,
+    overlay: Arc<PendingOverlay>,
     mut rx: mpsc::UnboundedReceiver<String>,
 ) {
     while let Some(file_name) = rx.recv().await {
+        // Read the marker's inode before committing: after a successful commit
+        // the marker is unlinked and there is nothing left to look it up from.
+        let inode_id = queue
+            .read(&file_name)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.inode_id);
+
         let outcome = commit_one(&pool, &queue, &file_name).await;
 
         // Clear before acting on the result: a marker whose commit failed must
@@ -469,8 +616,14 @@ async fn drain_loop(
         }
 
         match outcome {
-            // Checkpointed: the slot is genuinely free again.
-            Ok(Some(_)) => gate.release(),
+            // Checkpointed: the row is real, so the overlay must step aside and
+            // the slot is genuinely free again.
+            Ok(Some(_)) => {
+                if let Some(inode_id) = inode_id {
+                    overlay.withdraw(inode_id, &file_name);
+                }
+                gate.release()
+            }
             // Someone else already checkpointed it and freed its slot.
             Ok(None) => {}
             Err(e) => {

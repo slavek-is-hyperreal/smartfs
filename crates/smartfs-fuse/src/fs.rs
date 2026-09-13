@@ -179,6 +179,13 @@ impl Filesystem for SmartFsFuse {
         match res {
             Ok(record) => {
                 let mut attr = inode_to_file_attr(&record);
+                // ADR-58: report the size of a write that has been
+                // acknowledged but not yet committed, or stat() would contradict
+                // the write() that just returned.
+                if let Some(view) = self.pending.view_of(record.id) {
+                    attr.size = view.size.max(0) as u64;
+                    attr.blocks = attr.size.div_ceil(512);
+                }
                 if let Some(h_id) = fh {
                     if let Some(handle) = self.state.get_handle(h_id) {
                         if let Some(buf) = &handle.buffer {
@@ -454,12 +461,21 @@ impl Filesystem for SmartFsFuse {
             buf
         } else {
             // 2. Otherwise read from store
+            let pending = self.pending.clone();
             let res: Result<Vec<u8>> = self.block_on(async move {
                 let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
                     .await?
                     .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
 
-                if let Some(blob_id) = record.current_blob_id {
+                // ADR-58: a write acknowledged but not yet committed is not in
+                // inode_registry yet. Without this the mount would serve the
+                // previous version back to the process that just wrote it.
+                let blob = match pending.view_of(record.id) {
+                    Some(view) => view.blob_id,
+                    None => record.current_blob_id,
+                };
+
+                if let Some(blob_id) = blob {
                     let compressed = store.get(blob_id, None).await?;
                     let decompressed =
                         smartfs_compress::decompress(&compressed).unwrap_or(compressed);

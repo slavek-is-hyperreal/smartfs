@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T00:56:16.121500258Z",
+  "generated_at": "2026-09-13T01:02:39.665144194Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -1845,7 +1845,7 @@
       "kind": "ImplBlock",
       "name": "Gate",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 152,
+      "last_known_line": 211,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1878,7 +1878,7 @@
       "kind": "Struct",
       "name": "PendingLimits",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 73,
+      "last_known_line": 74,
       "doc_summary": "Startup-computed bounds for the pending pipeline.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1889,7 +1889,18 @@
       "kind": "ImplBlock",
       "name": "PendingLimits",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 81,
+      "last_known_line": 82,
+      "doc_summary": null,
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "51a244ad-963c-4bc4-8fea-efee83c9faa5",
+      "crate_name": "smartfs-fuse",
+      "kind": "ImplBlock",
+      "name": "PendingOverlay",
+      "last_known_file": "crates/smartfs-fuse/src/pending.rs",
+      "last_known_line": 170,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1900,7 +1911,7 @@
       "kind": "Struct",
       "name": "PendingPipeline",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 215,
+      "last_known_line": 274,
       "doc_summary": "Producer side of the pipeline, held by the FUSE filesystem.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1911,8 +1922,19 @@
       "kind": "ImplBlock",
       "name": "PendingPipeline",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 230,
+      "last_known_line": 290,
       "doc_summary": null,
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "a4f6eb30-db3a-4304-a3be-54dc0dff9ad8",
+      "crate_name": "smartfs-fuse",
+      "kind": "Struct",
+      "name": "PendingView",
+      "last_known_file": "crates/smartfs-fuse/src/pending.rs",
+      "last_known_line": 145,
+      "doc_summary": "What an uncommitted write already looks like to a reader.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -2010,7 +2032,7 @@
       "kind": "Function",
       "name": "entries_for_ram",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 110,
+      "last_known_line": 111,
       "doc_summary": "Turns a total-RAM figure into an entry budget, clamped both ways.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2043,7 +2065,7 @@
       "kind": "Function",
       "name": "from_env",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 89,
+      "last_known_line": 90,
       "doc_summary": "Computes the limits once, from total RAM and the environment.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2098,7 +2120,7 @@
       "kind": "Function",
       "name": "limits",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 326,
+      "last_known_line": 402,
       "doc_summary": "Bounds this pipeline was started with.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2153,7 +2175,7 @@
       "kind": "Function",
       "name": "next_seq",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 332,
+      "last_known_line": 408,
       "doc_summary": "Takes the next FIFO sequence number.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2166,6 +2188,17 @@
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
       "last_known_line": 293,
       "doc_summary": "Returns the number of open file descriptors for the given inode.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "c5bbe7db-1633-48e5-8e2d-41b13791e7be",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "overlay_depth",
+      "last_known_file": "crates/smartfs-fuse/src/pending.rs",
+      "last_known_line": 486,
+      "doc_summary": "Inodes currently shadowed by an uncommitted write.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -2186,7 +2219,7 @@
       "kind": "Function",
       "name": "queue",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 320,
+      "last_known_line": 396,
       "doc_summary": "The queue directory, for the scan and for status reporting.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2197,7 +2230,7 @@
       "kind": "Function",
       "name": "quiesce",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 437,
+      "last_known_line": 574,
       "doc_summary": "Waits until the RAM queue is empty, or `timeout` elapses.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2208,7 +2241,7 @@
       "kind": "Function",
       "name": "ram_depth",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 339,
+      "last_known_line": 415,
       "doc_summary": "Writes accepted but not yet checkpointed. This is what the limit bounds",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2219,7 +2252,7 @@
       "kind": "Function",
       "name": "read_total_ram_bytes",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 122,
+      "last_known_line": 123,
       "doc_summary": "Reads `MemTotal` from `/proc/meminfo`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2230,7 +2263,7 @@
       "kind": "Function",
       "name": "rescan",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 397,
+      "last_known_line": 534,
       "doc_summary": "Decision point 4: rescans `pending/queue/` and hands the drain anything",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2252,7 +2285,7 @@
       "kind": "Function",
       "name": "start",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 239,
+      "last_known_line": 299,
       "doc_summary": "Starts the pipeline: binds the queue directory, seeds the sequence",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2285,7 +2318,7 @@
       "kind": "Function",
       "name": "submit",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 352,
+      "last_known_line": 428,
       "doc_summary": "Stage 1 of the commit: make the write durable, then hand it to the drain.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2342,6 +2375,17 @@
       "last_known_file": "crates/smartfs-fuse/src/syntax.rs",
       "last_known_line": 30,
       "doc_summary": "Validates source code syntax.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "fe5886be-9f14-4b15-b473-495b13742fbe",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "view_of",
+      "last_known_file": "crates/smartfs-fuse/src/pending.rs",
+      "last_known_line": 480,
+      "doc_summary": "The newest uncommitted write for `inode_id`, if there is one.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
