@@ -106,6 +106,17 @@ Mierzy: opóźnienie `close()` (p50/p95/p99), czas drenażu kolejki, przepustowo
 
 Porównanie idzie względem `scripts/testing/perf-baseline.json`, odświeżanego **ręcznie i świadomie**, nigdy automatycznie.
 
+## 5b. Co pokazał pierwszy pomiar wydajności
+
+Etap 5 przy pierwszym uruchomieniu znalazł błąd, którego nikt nie szukał: **odczyt szedł 1,16 MB/s**, bo `read()` nigdy nie wypełniał bufora per-fd i każde wywołanie dekompresowało cały plik, żeby zwrócić jeden wycinek. Naprawione (`971aab1`), ale przy okazji odsłoniło dwie rzeczy warte zapisania.
+
+**Pierwsza: `ensure_buffer` trzymał globalny lock przez I/O.** Brał zapis na `handles` i *trzymając go* wołał loader robiący zapytanie do bazy i pobranie bloba — jeden lock na wszystkie otwarte uchwyty, przez czas I/O. Było do przeżycia, dopóki używał go tylko `write()`. Rozdzielone na `needs_buffer()` + `set_buffer_if_absent()`: ładowanie poza lockiem, publikacja pod nim.
+
+**Druga, strukturalna: ADR-58 dołożył fsync do każdego zapisu.** Ścieżka `close()` robi dziś **dwa** `sync_all` — jeden na blobie w `store.put`, drugi na znaczniku w `PendingQueue::enqueue`. Przedtem był jeden. ADR-58 usunął ze ścieżki zapisu transakcję Postgresową i wstawił w to miejsce trwały zapis na dysk. Czy to się opłaciło, jest dokładnie tym pytaniem, dla którego etap 5 powstał.
+
+**Ostrzeżenie metodologiczne, wpisane tu celowo:** pierwsze porównania między przebiegami były bezwartościowe, bo etap 5 biegł po pjdfstest i po 25 rundach crash-testu młócących ten sam dysk. Izolacja (`echo "0 5" > _control/run`) odzyskała większość metryk. **Zanim jakakolwiek różnica zostanie czemukolwiek przypisana, trzeba znać rozrzut przebieg-do-przebiegu przy tym samym commicie.** Porównywanie pojedynczych pomiarów bez tego to zgadywanie z liczbami dla ozdoby.
+
+
 ## 6. Pętla „napraw → ponów" bez nadzoru
 
 Cel: agent iteruje samodzielnie, aż wszystkie porażki są zaklasyfikowane.
