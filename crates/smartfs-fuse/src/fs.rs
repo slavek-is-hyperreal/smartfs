@@ -13,6 +13,7 @@
 
 use std::ffi::{CString, OsStr};
 use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -202,6 +203,9 @@ impl Filesystem for SmartFsFuse {
                             attr.blocks = attr.size.div_ceil(512);
                         }
                     }
+                } else if let Some(buf_len) = self.state.get_inode_buffer_len(record.id) {
+                    attr.size = buf_len as u64;
+                    attr.blocks = attr.size.div_ceil(512);
                 }
                 reply.attr(&TTL, &attr);
             }
@@ -383,7 +387,7 @@ impl Filesystem for SmartFsFuse {
                 uid.map(|u| u as i32),
                 gid.map(|g| g as i32),
                 mode.map(|m| (m & 0o7777) as i32),
-                size.map(|s| s as i64),
+                None, // size is managed exclusively by cow_commit / drain pipeline
             )
             .await?;
 
@@ -462,6 +466,8 @@ impl Filesystem for SmartFsFuse {
                 for (idx, child) in children.into_iter().enumerate() {
                     let kind = if child.is_dir {
                         FileType::Directory
+                    } else if (child.mode as u32 & libc::S_IFMT) == libc::S_IFLNK {
+                        FileType::Symlink
                     } else {
                         FileType::RegularFile
                     };
@@ -1236,6 +1242,173 @@ impl Filesystem for SmartFsFuse {
                 let attr = inode_to_file_attr(&file);
                 reply.entry(&TTL, &attr, 1);
             }
+            Err(e) => reply.error(error_to_errno(&e)),
+        }
+    }
+
+    fn symlink(
+        &mut self,
+        req: &Request<'_>,
+        parent: u64,
+        link_name: &OsStr,
+        target: &Path,
+        reply: ReplyEntry,
+    ) {
+        let name_str = match link_name.to_str() {
+            Some(s) => s.to_string(),
+            None => {
+                reply.error(libc::EINVAL);
+                return;
+            }
+        };
+
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
+        let target_bytes = target.as_os_str().as_bytes().to_vec();
+        if target_bytes.is_empty() {
+            reply.error(libc::ENOENT);
+            return;
+        }
+        if target_bytes.len() > 4096 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
+        let target_len = target_bytes.len();
+        let pool = self.pool.clone();
+        let store = self.store.clone();
+        let state = self.state.clone();
+        let pending = self.pending.clone();
+        let uid = req.uid() as i32;
+        let gid = req.gid() as i32;
+
+        let res: Result<smartfs_db::InodeRecord> = self.block_on(async move {
+            let parent_record = smartfs_db::inode_lookup_by_ino(&pool, parent as i64)
+                .await?
+                .ok_or_else(|| {
+                    SmartFsError::NotFound(format!("Parent inode {parent} not found"))
+                })?;
+
+            let hash = smartfs_compress::hash_bytes(&target_bytes).0;
+            let blob_uuid = Uuid::new_v4();
+            let size = target_bytes.len() as i64;
+
+            let insert_result =
+                smartfs_db::insert_blob(&pool, &hash, blob_uuid, None, size).await?;
+            let blob_id = insert_result.blob_id;
+
+            let mut compressed_size = None;
+            if insert_result.inserted {
+                let compressed = match smartfs_compress::compress(&target_bytes, 1) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = smartfs_db::compensate_blob_delete(&pool, &hash).await;
+                        return Err(e);
+                    }
+                };
+                match store.put(blob_id, &compressed).await {
+                    Ok(()) => {
+                        let c_size = compressed.len() as i64;
+                        compressed_size = Some(c_size);
+                        let _ =
+                            smartfs_db::update_blob_compressed_size(&pool, &hash, c_size).await;
+                    }
+                    Err(e) => {
+                        let _ = smartfs_db::compensate_blob_delete(&pool, &hash).await;
+                        return Err(e);
+                    }
+                }
+            } else if let Ok(exists) = store.exists(blob_id).await {
+                if !exists {
+                    if let Ok(compressed) = smartfs_compress::compress(&target_bytes, 1) {
+                        let _ = store.put(blob_id, &compressed).await;
+                    }
+                }
+            }
+
+            let mode = (libc::S_IFLNK | 0o777) as i32;
+            let created = smartfs_db::inode_create(
+                &pool,
+                Some(parent_record.id),
+                &name_str,
+                false,
+                uid,
+                gid,
+                mode,
+            )
+            .await?;
+
+            let seq = pending.next_seq();
+            let marker = smartfs_schema::PendingMarker {
+                seq,
+                inode_id: created.id,
+                parent_inode: created.parent_id,
+                name: created.name.clone(),
+                version_id: Uuid::new_v4(),
+                content_hash: hash.clone(),
+                blob_id: Some(blob_id),
+                size,
+                compressed_size,
+                external_path: None,
+                mode: created.mode as u32,
+                uid: created.uid as u32,
+                gid: created.gid as u32,
+                special_type: Some("symlink".to_string()),
+                special_data: None,
+                ast_nodes: serde_json::Value::Array(Vec::new()),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            };
+            pending.submit(&marker).await?;
+
+            state.cache_ino_mapping(created.ino as u64, created.id);
+            Ok(created)
+        });
+
+        match res {
+            Ok(created) => {
+                let mut attr = inode_to_file_attr(&created);
+                attr.kind = FileType::Symlink;
+                attr.size = target_len as u64;
+                attr.blocks = attr.size.div_ceil(512);
+                reply.entry(&TTL, &attr, 1);
+            }
+            Err(e) => reply.error(error_to_errno(&e)),
+        }
+    }
+
+    fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyData) {
+        let pool = self.pool.clone();
+        let store = self.store.clone();
+        let pending = self.pending.clone();
+
+        let res: Result<Vec<u8>> = self.block_on(async move {
+            let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
+                .await?
+                .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
+
+            if (record.mode as u32 & libc::S_IFMT) != libc::S_IFLNK {
+                return Err(SmartFsError::Io(std::io::Error::from_raw_os_error(libc::EINVAL)));
+            }
+
+            let blob = match pending.view_of(record.id) {
+                Some(view) => view.blob_id,
+                None => record.current_blob_id,
+            };
+
+            if let Some(blob_id) = blob {
+                let compressed = store.get(blob_id, None).await?;
+                let decompressed = smartfs_compress::decompress(&compressed).unwrap_or(compressed);
+                Ok(decompressed)
+            } else {
+                Ok(Vec::new())
+            }
+        });
+
+        match res {
+            Ok(data) => reply.data(&data),
             Err(e) => reply.error(error_to_errno(&e)),
         }
     }

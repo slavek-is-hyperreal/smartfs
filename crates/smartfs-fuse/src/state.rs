@@ -24,6 +24,8 @@ pub fn inode_to_file_attr(record: &InodeRecord) -> FileAttr {
     let blocks = size.div_ceil(512);
     let kind = if record.is_dir {
         FileType::Directory
+    } else if (record.mode as u32 & libc::S_IFMT) == libc::S_IFLNK {
+        FileType::Symlink
     } else {
         FileType::RegularFile
     };
@@ -255,6 +257,20 @@ impl FuseStateManager {
                 handle.modified = true;
             }
         }
+    }
+
+    /// @id: 9a8b7c6d-5e4f-4321-ba09-fedcba987654
+    /// Returns the length of the in-memory buffer for an open handle of the given inode, if any.
+    pub fn get_inode_buffer_len(&self, inode_id: Uuid) -> Option<usize> {
+        let handles = self.handles.read().expect("handles lock poisoned");
+        for handle in handles.values() {
+            if handle.inode_id == inode_id {
+                if let Some(buf) = &handle.buffer {
+                    return Some(buf.len());
+                }
+            }
+        }
+        None
     }
 
     /// @id: 5c03b4c5-d6e7-4f80-91a2-b3c4d5e6f709
