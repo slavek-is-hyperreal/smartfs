@@ -226,6 +226,30 @@ impl FuseStateManager {
         Ok(())
     }
 
+    /// @id: 5c03b4c5-d6e7-4f80-91a2-b3c4d5e6f709
+    /// Updates all open handles for an inode with newly committed truncated data, setting modified=false.
+    pub fn truncate_inode_handles_committed(&self, inode_id: Uuid, data: &[u8]) {
+        let mut handles = self.handles.write().expect("handles lock poisoned");
+        for handle in handles.values_mut() {
+            if handle.inode_id == inode_id {
+                handle.buffer = Some(data.to_vec());
+                handle.modified = false;
+            }
+        }
+    }
+
+    /// @id: 5c03b4c5-d6e7-4f80-91a2-b3c4d5e6f70a
+    /// Updates a specific open handle with newly committed truncated data, setting modified=false.
+    pub fn truncate_handle_committed(&self, fh: u64, data: &[u8]) -> Result<()> {
+        let mut handles = self.handles.write().expect("handles lock poisoned");
+        let handle = handles
+            .get_mut(&fh)
+            .ok_or_else(|| SmartFsError::NotFound(format!("File handle {fh} not found")))?;
+        handle.buffer = Some(data.to_vec());
+        handle.modified = false;
+        Ok(())
+    }
+
     /// @id: 6d14c5d6-e7f8-4091-a2b3-c4d5e6f70819
     /// Store AST nodes in per-fd state (extracted during `flush()`).
     pub fn store_ast_nodes(&self, fh: u64, nodes: Vec<AstNodeInsert>) {

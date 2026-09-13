@@ -1,0 +1,9 @@
+# pjdfstest expected failures for SmartFS.
+#
+# Format:  <test name><TAB># <category>: <one-line justification>
+# Category is exactly one of:
+#     LIMITATION   - intentional, documented SmartFS MVP limitation
+#     FUSE         - inherent to FUSE, outside SmartFS's control
+#
+# A "real SmartFS bug" NEVER belongs in this file. File it as a bug instead.
+# An entry without a justification comment fails Stage 2 on purpose.

@@ -120,6 +120,11 @@ impl Filesystem for SmartFsFuse {
             }
         };
 
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
         let pool = self.pool.clone();
         let state = self.state.clone();
         let res: Result<smartfs_db::InodeRecord> = self.block_on(async move {
@@ -158,7 +163,11 @@ impl Filesystem for SmartFsFuse {
 
         match res {
             Ok(record) => {
-                let attr = inode_to_file_attr(&record);
+                let mut attr = inode_to_file_attr(&record);
+                if let Some(view) = self.pending.view_of(record.id) {
+                    attr.size = view.size.max(0) as u64;
+                    attr.blocks = attr.size.div_ceil(512);
+                }
                 reply.entry(&TTL, &attr, 1);
             }
             Err(e) => reply.error(error_to_errno(&e)),
@@ -219,19 +228,120 @@ impl Filesystem for SmartFsFuse {
         reply: ReplyAttr,
     ) {
         let pool = self.pool.clone();
+        let store = self.store.clone();
         let state = self.state.clone();
+        let pending = self.pending.clone();
 
-        // O_TRUNC / truncate buffer management in memory (§11.2a)
-        if let Some(new_size) = size {
-            if let Some(h_id) = fh {
-                let _ = state.truncate_handle(h_id, new_size as usize);
-            }
-        }
-
-        let res: Result<smartfs_db::InodeRecord> = self.block_on(async move {
+        let res: Result<(smartfs_db::InodeRecord, Option<Vec<u8>>)> = self.block_on(async move {
             let record = smartfs_db::inode_lookup_by_ino(&pool, ino as i64)
                 .await?
                 .ok_or_else(|| SmartFsError::NotFound(format!("Inode {ino} not found")))?;
+
+            let mut truncated_data = None;
+
+            if let Some(new_size) = size {
+                let current_size = match pending.view_of(record.id) {
+                    Some(view) => view.size as u64,
+                    None => record.size as u64,
+                };
+
+                // Root Invariant #2: Every content change creates a new file_versions row (CoW).
+                // Truncate alters file content and must commit the truncated blob to pending pipeline.
+                if new_size != current_size || record.current_blob_id.is_none() {
+                    let data = if new_size == 0 {
+                        Vec::new()
+                    } else {
+                        let blob = match pending.view_of(record.id) {
+                            Some(view) => view.blob_id,
+                            None => record.current_blob_id,
+                        };
+                        let mut orig = if let Some(blob_id) = blob {
+                            let comp = store.get(blob_id, None).await?;
+                            smartfs_compress::decompress(&comp).unwrap_or(comp)
+                        } else {
+                            Vec::new()
+                        };
+                        orig.resize(new_size as usize, 0);
+                        orig
+                    };
+
+                    let hash = smartfs_compress::hash_bytes(&data).0;
+                    let new_blob_uuid = Uuid::new_v4();
+                    let backend_id = record.backend_id;
+                    let compression_level = record.compression_level as i32;
+
+                    let insert_result = smartfs_db::insert_blob(
+                        &pool,
+                        &hash,
+                        new_blob_uuid,
+                        backend_id,
+                        new_size as i64,
+                    )
+                    .await?;
+                    let blob_id = insert_result.blob_id;
+
+                    let mut compressed_size = None;
+                    if insert_result.inserted {
+                        let compressed =
+                            match smartfs_compress::compress(&data, compression_level) {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    let _ = smartfs_db::compensate_blob_delete(&pool, &hash).await;
+                                    return Err(e);
+                                }
+                            };
+
+                        match store.put(blob_id, &compressed).await {
+                            Ok(()) => {
+                                let c_size = compressed.len() as i64;
+                                compressed_size = Some(c_size);
+                                let _ = smartfs_db::update_blob_compressed_size(
+                                    &pool, &hash, c_size,
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                let _ = smartfs_db::compensate_blob_delete(&pool, &hash).await;
+                                return Err(e);
+                            }
+                        }
+                    } else {
+                        if let Ok(exists) = store.exists(blob_id).await {
+                            if !exists {
+                                if let Ok(compressed) =
+                                    smartfs_compress::compress(&data, compression_level)
+                                {
+                                    let _ = store.put(blob_id, &compressed).await;
+                                }
+                            }
+                        }
+                    }
+
+                    let seq = pending.next_seq();
+                    let marker = smartfs_schema::PendingMarker {
+                        seq,
+                        inode_id: record.id,
+                        parent_inode: record.parent_id,
+                        name: record.name.clone(),
+                        version_id: Uuid::new_v4(),
+                        content_hash: hash.clone(),
+                        blob_id: Some(blob_id),
+                        size: new_size as i64,
+                        compressed_size,
+                        external_path: None,
+                        mode: mode.map(|m| (m & 0o7777) as u32).unwrap_or(record.mode as u32),
+                        uid: uid.unwrap_or(record.uid as u32),
+                        gid: gid.unwrap_or(record.gid as u32),
+                        special_type: Some("generic".to_string()),
+                        special_data: None,
+                        ast_nodes: serde_json::Value::Array(Vec::new()),
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    pending.submit(&marker).await?;
+                    truncated_data = Some(data);
+                }
+            }
 
             let updated = smartfs_db::inode_update_attrs(
                 &pool,
@@ -243,19 +353,21 @@ impl Filesystem for SmartFsFuse {
             )
             .await?;
 
-            Ok(updated)
+            Ok((updated, truncated_data))
         });
 
         match res {
-            Ok(record) => {
-                let mut attr = inode_to_file_attr(&record);
-                if let Some(h_id) = fh {
-                    if let Some(handle) = self.state.get_handle(h_id) {
-                        if let Some(buf) = &handle.buffer {
-                            attr.size = buf.len() as u64;
-                            attr.blocks = attr.size.div_ceil(512);
-                        }
+            Ok((record, truncated_data)) => {
+                if let Some(data) = truncated_data {
+                    if let Some(h_id) = fh {
+                        let _ = state.truncate_handle_committed(h_id, &data);
                     }
+                    state.truncate_inode_handles_committed(record.id, &data);
+                }
+                let mut attr = inode_to_file_attr(&record);
+                if let Some(new_size) = size {
+                    attr.size = new_size;
+                    attr.blocks = new_size.div_ceil(512);
                 }
                 reply.attr(&TTL, &attr);
             }
@@ -350,6 +462,11 @@ impl Filesystem for SmartFsFuse {
                 return;
             }
         };
+
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
 
         let pool = self.pool.clone();
         let state = self.state.clone();
@@ -796,6 +913,11 @@ impl Filesystem for SmartFsFuse {
             }
         };
 
+        if name_str.len() > 255 || newname_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
         let pool = self.pool.clone();
         let store = self.store.clone();
         let state = self.state.clone();
@@ -860,23 +982,34 @@ impl Filesystem for SmartFsFuse {
             }
         };
 
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
         let pool = self.pool.clone();
         let state = self.state.clone();
 
-        let res: Result<()> = self.block_on(async move {
+        let res: std::result::Result<(), libc::c_int> = self.block_on(async move {
             let parent_record = smartfs_db::inode_lookup_by_ino(&pool, parent as i64)
-                .await?
-                .ok_or_else(|| {
-                    SmartFsError::NotFound(format!("Parent inode {parent} not found"))
-                })?;
+                .await
+                .map_err(|e| error_to_errno(&e))?
+                .ok_or(libc::ENOENT)?;
 
             let child = smartfs_db::inode_lookup(&pool, Some(parent_record.id), &name_str)
-                .await?
-                .ok_or_else(|| SmartFsError::NotFound(format!("Child '{name_str}' not found")))?;
+                .await
+                .map_err(|e| error_to_errno(&e))?
+                .ok_or(libc::ENOENT)?;
+
+            if child.is_dir {
+                return Err(libc::EPERM);
+            }
 
             let should_delete_now = state.mark_for_deletion(child.id);
             if should_delete_now {
-                smartfs_db::inode_delete(&pool, child.id).await?;
+                smartfs_db::inode_delete(&pool, child.id)
+                    .await
+                    .map_err(|e| error_to_errno(&e))?;
             }
 
             Ok(())
@@ -884,12 +1017,69 @@ impl Filesystem for SmartFsFuse {
 
         match res {
             Ok(()) => reply.ok(),
-            Err(e) => reply.error(error_to_errno(&e)),
+            Err(errno) => reply.error(errno),
         }
     }
 
-    fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        self.unlink(req, parent, name, reply);
+    fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_str = match name.to_str() {
+            Some(s) => s.to_string(),
+            None => {
+                reply.error(libc::EINVAL);
+                return;
+            }
+        };
+
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
+        let pool = self.pool.clone();
+        let state = self.state.clone();
+
+        let res: std::result::Result<(), libc::c_int> = self.block_on(async move {
+            let parent_record = smartfs_db::inode_lookup_by_ino(&pool, parent as i64)
+                .await
+                .map_err(|e| error_to_errno(&e))?
+                .ok_or(libc::ENOENT)?;
+
+            let child = smartfs_db::inode_lookup(&pool, Some(parent_record.id), &name_str)
+                .await
+                .map_err(|e| error_to_errno(&e))?
+                .ok_or(libc::ENOENT)?;
+
+            if !child.is_dir {
+                return Err(libc::ENOTDIR);
+            }
+
+            let children = smartfs_db::inode_list_children(&pool, Some(child.id))
+                .await
+                .map_err(|e| error_to_errno(&e))?;
+
+            let active_children: Vec<_> = children
+                .into_iter()
+                .filter(|c| !state.is_marked_for_deletion(c.id))
+                .collect();
+
+            if !active_children.is_empty() {
+                return Err(libc::ENOTEMPTY);
+            }
+
+            let should_delete_now = state.mark_for_deletion(child.id);
+            if should_delete_now {
+                smartfs_db::inode_delete(&pool, child.id)
+                    .await
+                    .map_err(|e| error_to_errno(&e))?;
+            }
+
+            Ok(())
+        });
+
+        match res {
+            Ok(()) => reply.ok(),
+            Err(errno) => reply.error(errno),
+        }
     }
 
     fn mkdir(
@@ -908,6 +1098,11 @@ impl Filesystem for SmartFsFuse {
                 return;
             }
         };
+
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
 
         let pool = self.pool.clone();
         let state = self.state.clone();
@@ -962,6 +1157,18 @@ impl Filesystem for SmartFsFuse {
                 return;
             }
         };
+
+        if name_str.len() > 255 {
+            reply.error(libc::ENAMETOOLONG);
+            return;
+        }
+
+        let file_type = mode & libc::S_IFMT;
+        if file_type != libc::S_IFREG && file_type != 0 {
+            // SmartFS MVP does not support fifos, sockets, character or block devices
+            reply.error(libc::ENOTSUP);
+            return;
+        }
 
         let pool = self.pool.clone();
         let state = self.state.clone();

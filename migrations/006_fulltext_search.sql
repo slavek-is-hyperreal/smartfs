@@ -11,10 +11,19 @@
 -- wersji, zamiast ufać tej migracji w ciemno.
 -- ─────────────────────────────────────────────────────────────────
 
--- ── 1. Rozszerzenie ─────────────────────────────────────────────────
--- CASCADE dociąga pgvector, od którego pg_search zależy (i tak go używamy
--- od migracji 005 — brak konfliktu, tylko współdzielenie).
-CREATE EXTENSION IF NOT EXISTS pg_search CASCADE;
+-- ── 1. Rozszerzenie oraz indeksy BM25 ───────────────────────────────
+-- pg_search jest rozszerzeniem opcjonalnym (ParadeDB BM25). Jeśli jest
+-- dostępne na hoście PostgreSQL, włączamy je wraz z indeksami BM25.
+-- Jeśli nie jest zainstalowane, smartfs-db przełącza się transparentnie
+-- na wyszukiwanie fallback (ADR-54 / search_fulltext_bm25).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_search') THEN
+        EXECUTE 'CREATE EXTENSION IF NOT EXISTS pg_search CASCADE';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_file_versions_bm25 ON file_versions USING bm25 (id, search_text) WITH (key_field = ''id'') WHERE search_text IS NOT NULL';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_ast_nodes_bm25 ON ast_nodes USING bm25 (id, source) WITH (key_field = ''id'')';
+    END IF;
+END $$;
 
 -- ── 2. Kolumna tekstu przeszukiwalnego na poziomie pliku ────────────
 -- POWÓD (ADR-54): embeddingi warstwy ogólnej (embeddings_384/768/1024_qwen)
@@ -25,24 +34,7 @@ CREATE EXTENSION IF NOT EXISTS pg_search CASCADE;
 -- odczytu, która i tak już zachodzi (patrz docs/crates/smartfs-ai.md).
 -- NULL dla plików, których treść nie jest tekstem UTF-8 i których wtyczka
 -- nie ma żadnych opisowych pól string w schemacie.
-ALTER TABLE file_versions ADD COLUMN search_text TEXT;
-
--- ── 3. Indeksy BM25 ──────────────────────────────────────────────────
-
--- 3a. Warstwa plikowa — partial index, bo search_text bywa NULL.
-CREATE INDEX idx_file_versions_bm25
-    ON file_versions
-    USING bm25 (id, search_text)
-    WITH (key_field = 'id')
-    WHERE search_text IS NOT NULL;
-
--- 3b. Warstwa kodu per-funkcja — source już istnieje od v4.5 §3.7,
---     zero nowej kolumny, tylko indeks nad tym, co smartfs-ai i tak
---     czyta do embeddingu AST.
-CREATE INDEX idx_ast_nodes_bm25
-    ON ast_nodes
-    USING bm25 (id, source)
-    WITH (key_field = 'id');
+ALTER TABLE file_versions ADD COLUMN IF NOT EXISTS search_text TEXT;
 
 -- ── Weryfikacja po migracji ──────────────────────────────────────────
 -- [ ] pg_search i pgvector obecne w \dx
