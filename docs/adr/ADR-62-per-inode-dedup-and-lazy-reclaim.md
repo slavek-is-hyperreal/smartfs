@@ -47,7 +47,27 @@ To jest własność widoczna dla użytkownika, nie mikrooptymalizacja: „skasow
 
 Bez tej reguły sprzątacz mógłby wskazać plik z dedupem włączonym na bloba pliku z dedupem wyłączonym, i skasowanie tego drugiego przestałoby zwalniać miejsce. Gwarancja wyparowałaby po cichu, w momencie niezwiązanym z żadną decyzją użytkownika.
 
-**Konsekwencja schematowa:** `blobs` przestaje być inwentarzem wszystkich blobów i staje się tym, czym w istocie jest — **indeksem dedupu**. Wersja prywatna ma `blob_id` wskazujący plik i **nie ma wiersza w `blobs`**. Inaczej się nie da: `content_hash` jest tam kluczem głównym, więc prywatny i współdzielony blob o identycznej treści nie mogą tam współistnieć.
+**Konsekwencja schematowa — poprawiona 2026-09-13 po zarzucie właściciela projektu.**
+
+Pierwsza wersja tego punktu mówiła: wersja prywatna nie ma wiersza w `blobs`, bo `content_hash` jest tam kluczem głównym i prywatny nie zmieści się obok współdzielonego o tej samej treści. **To było złe rozwiązanie**, i zarzut brzmiał: skoro baza obsługuje wyszukiwanie pełnotekstowe i resztę, to plik nie może istnieć bez wpisu w bazie.
+
+Sam zarzut celuje obok — full-text search indeksuje `file_versions.search_text` i `ast_nodes.source`, nie `blobs`, a ścieżka odczytu FUSE nie pyta `blobs` **ani razu**; plik zawsze ma wiersze w `inode_registry` i `file_versions`. Ale prowadzi do właściwego wniosku: **niekompletny inwentarz blobów jest sam w sobie wadą**, bo stoją na nim dwie rzeczy — sprawdzian Invariantu #1 w etapie 4 i scrub sum kontrolnych, oba przez `JOIN blobs`. Obie po cichu przestałyby weryfikować bloby prywatne.
+
+**Rozwiązanie: każdy fizyczny blob zachowuje wiersz; warunkowe jest wyłącznie uczestnictwo w dedupie.**
+
+```sql
+-- klucz główny na blob_id, nie na content_hash
+blob_id      UUID PRIMARY KEY,
+content_hash TEXT NOT NULL,
+shared       BOOLEAN NOT NULL DEFAULT TRUE,
+
+-- indeks dedupu: unikalność treści tylko wśród blobów współdzielonych
+CREATE UNIQUE INDEX blobs_dedup ON blobs (content_hash) WHERE shared;
+```
+
+`blobs` pozostaje kompletnym inwentarzem **i jednocześnie** indeksem dedupu — tym drugim przez indeks częściowy, a nie przez klucz główny. Sprawdzian Invariantu #1 i scrub działają bez żadnej zmiany.
+
+Sprawdzone empirycznie na PostgreSQL 16: dwa bloby prywatne o identycznej treści współistnieją; prywatny i współdzielony o identycznej treści współistnieją; drugi **współdzielony** o tej samej treści jest odrzucany przez `blobs_dedup`; a `INSERT ... ON CONFLICT (content_hash) WHERE shared DO UPDATE ... RETURNING blob_id, (xmax = 0)` — czyli serce dedupu z FIX-01 — działa na indeksie częściowym bez zmian w logice.
 
 ### 5. Dedup włączony: leniwy, rozstrzygany w drenażu
 
@@ -79,8 +99,9 @@ Jego zadanie: znaleźć bloby, których nie referuje żaden wiersz `file_version
 ## Konsekwencje
 
 - Migracja: `dedup_enabled BOOLEAN NOT NULL DEFAULT TRUE` w `inode_registry`.
-- `blobs` zmienia znaczenie z „inwentarz blobów" na „indeks dedupu" — wymaga to poprawki w dokumentacji schematu, bo dziś czyta się inaczej.
-- **Etap 4 planu testowego przestaje weryfikować bloby prywatne.** `check_invariant_1_crypto` robi `JOIN blobs b ON b.content_hash = fv.content_hash`, więc wersja bez wiersza w `blobs` zostanie po cichu pominięta — sprawdzian, który cicho przestaje sprawdzać, jest gorszy niż jego brak. Do rozszerzenia razem z tą zmianą.
+- `blobs` pozostaje inwentarzem i **dodatkowo** pełni rolę indeksu dedupu, przez indeks częściowy zamiast klucza głównego.
+- **Etap 4 i scrub działają bez zmian** dzięki poprawce z punktu 4: inwentarz zostaje kompletny. W pierwszej wersji tego ADR-a obie te weryfikacje po cichu przestałyby obejmować bloby prywatne — sprawdzian, który cicho przestaje sprawdzać, jest gorszy niż jego brak. Warto zapisać, że to była realna pułapka, a nie hipotetyczna.
+- Migracja zmienia klucz główny `blobs` z `content_hash` na `blob_id` i dokłada `shared` plus indeks częściowy. To jedyna zmiana w tej tabeli; `insert_blob` zyskuje `WHERE shared` w klauzuli `ON CONFLICT` i poza tym zostaje bez zmian.
 - FIX-03 i FIX-04 tracą swoje uzasadnienie na ścieżce leniwej: ich sens polega na tym, że wiersz w `blobs` powstaje **przed** zapisem bajtów, więc crash zostawia wykrywalny „zatruty wiersz". Po odwróceniu crash zostawia osierocony plik bez wiersza — stan niewidoczny przez mount (Invariant #3) i sprzątany przez GC. To wygląda na **uproszczenie** semantyki crashowej, ale K1–K5 mierzą dokładnie ten obszar i muszą zostać przepisane, a nie założone.
 - GC-by-scan przestaje być teoretyczny i staje się warunkiem koniecznym.
 
