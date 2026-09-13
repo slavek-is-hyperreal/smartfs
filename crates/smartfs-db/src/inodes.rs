@@ -15,7 +15,7 @@ pub async fn inode_lookup(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev, atime, mtime
+               compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1 AND name = $2
         "#,
@@ -34,7 +34,7 @@ pub async fn inode_lookup_by_ino(pool: &PgPool, ino: i64) -> Result<Option<Inode
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev, atime, mtime
+               compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         FROM inode_registry
         WHERE ino = $1
         "#,
@@ -52,7 +52,7 @@ pub async fn inode_get(pool: &PgPool, id: Uuid) -> Result<Option<InodeRecord>> {
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev, atime, mtime
+               compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         FROM inode_registry
         WHERE id = $1
         "#,
@@ -106,7 +106,7 @@ pub async fn inode_create_with_rdev(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled, rdev, atime, mtime
+                  compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         "#,
     )
     .bind(parent_id)
@@ -142,7 +142,7 @@ pub async fn inode_list_children(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev, atime, mtime
+               compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1
         ORDER BY ino ASC
@@ -175,7 +175,7 @@ pub async fn inode_update_attrs(
         WHERE id = $1
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled, rdev, atime, mtime
+                  compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         "#,
     )
     .bind(id)
@@ -305,7 +305,7 @@ pub async fn inode_set_times(
         WHERE id = $1
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled, rdev, atime, mtime
+                  compression_level, versioning_enabled, rdev, atime, mtime, dedup_enabled
         "#,
     )
     .bind(id)

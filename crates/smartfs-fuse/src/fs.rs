@@ -867,12 +867,18 @@ impl Filesystem for SmartFsFuse {
 
                         // Step 1: Outside transaction
                         let t_hash = t_start.elapsed();
-                        let insert_result = smartfs_db::insert_blob(
+                        // ADR-62: the inode's policy decides whether this blob
+                        // joins the dedup index. A private blob keeps its
+                        // inventory row but stays out of the partial unique
+                        // index, so nothing else can ever come to depend on it
+                        // — which is what lets unlink free it immediately.
+                        let insert_result = smartfs_db::insert_blob_with_sharing(
                             &pool,
                             &hash,
                             new_blob_uuid,
                             backend_id,
                             size,
+                            record.dedup_enabled,
                         )
                         .await?;
                         let blob_id = insert_result.blob_id;
@@ -1119,6 +1125,7 @@ impl Filesystem for SmartFsFuse {
 
         let pool = self.pool.clone();
         let state = self.state.clone();
+        let store = self.store.clone();
 
         let res: std::result::Result<(), libc::c_int> = self.block_on(async move {
             let parent_record = smartfs_db::inode_lookup_by_ino(&pool, parent as i64)
@@ -1135,11 +1142,31 @@ impl Filesystem for SmartFsFuse {
                 return Err(libc::EPERM);
             }
 
+            // ADR-62 §Rozstrzygnięcia #3: for a private blob the space comes
+            // back now, not eventually. A private blob has exactly one owner, so
+            // no proof of non-reference is needed — and one unlink(2) is noise
+            // beside the Postgres commit this path already pays for
+            // inode_delete. A shared blob is left alone: freeing it needs the
+            // scan, which is the cleaner's job.
+            let private_blob = smartfs_db::private_blob_of_inode(&pool, child.id)
+                .await
+                .unwrap_or(None);
+
             let should_delete_now = state.mark_for_deletion(child.id);
             if should_delete_now {
                 smartfs_db::inode_delete(&pool, child.id)
                     .await
                     .map_err(|e| error_to_errno(&e))?;
+
+                if let Some(blob_id) = private_blob {
+                    // Order matters: the row goes first, so a crash between the
+                    // two leaves an orphan file — invisible through the mount
+                    // and reclaimable — rather than a row pointing at bytes that
+                    // are gone, which would fail every read of it forever.
+                    if let Err(e) = store.delete(blob_id).await {
+                        tracing::warn!("private blob {blob_id} left behind after unlink: {e}");
+                    }
+                }
             }
 
             Ok(())

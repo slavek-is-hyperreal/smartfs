@@ -39,6 +39,11 @@ const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// long: this hunts bit rot, which is slow, and must never crowd out live I/O.
 const SCRUB_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// Fallback idle interval for the blob cleaner when no consolidation_thresholds
+/// row supplies one. ADR-62 puts reclamation in the filesystem's sleep phase,
+/// and migration 005 already defines that signal.
+const CLEANER_FALLBACK_INTERVAL: Duration = Duration::from_secs(1800);
+
 /// Blobs verified per scrub pass. A sample, so one pass is bounded however
 /// large the store grows; successive passes cover it over time.
 const SCRUB_SAMPLE: i64 = 512;
@@ -312,6 +317,45 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         }
     });
 
+    // Blob cleaner (ADR-62). Distinct from both neighbours and its logs say so:
+    // the pending scan looks for a missing row under an existing file, the scrub
+    // for a bad file under an existing row, and this for a file no row
+    // references at all. Blobs have leaked since the beginning — deleting an
+    // inode cascades its versions away and leaves the bytes forever — so this
+    // pays for itself independently of anything else in ADR-62.
+    let cleaner_pool = pool.clone();
+    let cleaner_store = Arc::clone(&store);
+    let cleaner_queue = pipeline.queue().clone();
+    // Reuse the idle signal migration 005 already defines rather than inventing
+    // a second notion of "the system is quiet". With no calibrated combination
+    // there is no such row, so fall back — a missing threshold must not mean
+    // "never reclaim".
+    let cleaner_interval = match smartfs_semantic::fetch_calibrated_combinations(&pool).await {
+        Ok(combos) => match combos.first() {
+            Some((plugin_type, model_id)) => {
+                match smartfs_semantic::load_consolidation_config(&pool, plugin_type, *model_id)
+                    .await
+                {
+                    Ok(cfg) => cfg.idle_before_sleep,
+                    Err(_) => CLEANER_FALLBACK_INTERVAL,
+                }
+            }
+            None => CLEANER_FALLBACK_INTERVAL,
+        },
+        Err(_) => CLEANER_FALLBACK_INTERVAL,
+    };
+    let cleaner_task = tokio::spawn(smartfs_fuse::cleaner_loop(
+        cleaner_pool,
+        cleaner_store,
+        cleaner_queue,
+        cleaner_interval,
+        smartfs_fuse::cleaner::DEFAULT_GRACE_SECS,
+    ));
+    tracing::info!(
+        interval_s = cleaner_interval.as_secs(),
+        "blob cleaner armed on the idle signal"
+    );
+
     // ── Step 10. prove the mount is serving, then publish readiness ─────────
     let fstype = wait_until_serving(&mountpoint, MOUNT_READY_TIMEOUT)
         .await
@@ -366,6 +410,7 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
         _ = sigterm.recv() => tracing::info!("SIGTERM received, shutting down"),
     }
 
+    cleaner_task.abort();
     scrub_task.abort();
     for handle in &supervisors {
         handle.abort();

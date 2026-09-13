@@ -6,6 +6,7 @@
 //! FIX-01 (refcount-free blobs), FIX-02 (is_current owned by worker, not cow_commit),
 //! FIX-03 (physical blob existence check), and FIX-04 (store.put failure compensation).
 
+pub mod cleaner;
 pub mod error;
 pub mod fs;
 pub mod mount;
@@ -13,6 +14,7 @@ pub mod pending;
 pub mod state;
 pub mod syntax;
 
+pub use cleaner::{clean_once, cleaner_loop, CleanReport};
 pub use error::error_to_errno;
 pub use fs::{SmartFsFuse, TTL};
 pub use mount::{default_mount_options, mount_smartfs, spawn_mount_smartfs};

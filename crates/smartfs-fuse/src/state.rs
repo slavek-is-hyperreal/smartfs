@@ -454,6 +454,7 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            dedup_enabled: true,
             atime: now,
             mtime: now,
             rdev: 0,
@@ -491,6 +492,7 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            dedup_enabled: true,
             atime: now,
             mtime: now,
             rdev: 0,
@@ -622,6 +624,7 @@ mod file_type_tests {
             compression_level: 3,
             versioning_enabled: true,
             rdev,
+            dedup_enabled: true,
             atime: now,
             mtime: now,
         }

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T16:10:43.668260375Z",
+  "generated_at": "2026-09-13T21:26:20.868072696Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -789,7 +789,7 @@
       "kind": "ImplBlock",
       "name": "GateExt<T> for Result<T>",
       "last_known_file": "crates/smartfs-daemon/src/main.rs",
-      "last_known_line": 67,
+      "last_known_line": 72,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -811,7 +811,7 @@
       "kind": "ImplBlock",
       "name": "Semantic",
       "last_known_file": "crates/smartfs-daemon/src/main.rs",
-      "last_known_line": 85,
+      "last_known_line": 90,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -822,7 +822,7 @@
       "kind": "Function",
       "name": "check_schema",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 199,
+      "last_known_line": 200,
       "doc_summary": "Step 6 — schema sanity check. Never issues DDL (Root Invariant #4).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -833,7 +833,7 @@
       "kind": "Function",
       "name": "column_exists",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 257,
+      "last_known_line": 258,
       "doc_summary": "Reports whether `table.column` exists in the `public` schema.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -844,7 +844,7 @@
       "kind": "Function",
       "name": "connect_and_probe_db",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 179,
+      "last_known_line": 180,
       "doc_summary": "Step 5 — connect the pool and prove the connection with `SELECT 1`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -866,7 +866,7 @@
       "kind": "Function",
       "name": "is_mountpoint",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 90,
+      "last_known_line": 91,
       "doc_summary": "Reports whether `path` appears as a mount target in `/proc/self/mountinfo`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -877,7 +877,7 @@
       "kind": "Function",
       "name": "mountinfo_fstype",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 100,
+      "last_known_line": 101,
       "doc_summary": "Returns the filesystem type `/proc/self/mountinfo` records for `path`, if it",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -888,7 +888,7 @@
       "kind": "Function",
       "name": "open_store",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 269,
+      "last_known_line": 270,
       "doc_summary": "Step 7 — open the blob store handle and prove it can reach the backend.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -910,7 +910,7 @@
       "kind": "Function",
       "name": "table_exists",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 249,
+      "last_known_line": 250,
       "doc_summary": "Reports whether `table` exists in the `public` schema.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -921,7 +921,7 @@
       "kind": "Function",
       "name": "unescape_mountinfo",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 130,
+      "last_known_line": 131,
       "doc_summary": "Decodes the octal escapes `/proc/self/mountinfo` uses in path fields.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -932,7 +932,7 @@
       "kind": "Function",
       "name": "validate_mountpoint",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 56,
+      "last_known_line": 57,
       "doc_summary": "Step 3 — validate the mountpoint: exists, is a directory, is empty, and is",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -943,7 +943,7 @@
       "kind": "Function",
       "name": "validate_store_path",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 152,
+      "last_known_line": 153,
       "doc_summary": "Step 4 — validate the store path: exists, is a directory, is writable",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -954,7 +954,7 @@
       "kind": "Struct",
       "name": "AstNodeInsert",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 99,
+      "last_known_line": 106,
       "doc_summary": "Parameters for inserting a new AST node.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -965,7 +965,7 @@
       "kind": "Struct",
       "name": "AstNodeRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 84,
+      "last_known_line": 91,
       "doc_summary": "Stored AST node record from `ast_nodes`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -976,7 +976,7 @@
       "kind": "Struct",
       "name": "BlobInsertResult",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 76,
+      "last_known_line": 83,
       "doc_summary": "Result of atomic blob insertion (FIX-01, FIX-03, FIX-04).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -987,7 +987,7 @@
       "kind": "Struct",
       "name": "BlobRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 64,
+      "last_known_line": 71,
       "doc_summary": "Content-addressed blob record from `blobs`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1009,7 +1009,7 @@
       "kind": "Struct",
       "name": "FileVersionRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 41,
+      "last_known_line": 48,
       "doc_summary": "File version record from `file_versions`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1020,7 +1020,7 @@
       "kind": "Struct",
       "name": "FulltextHit",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 129,
+      "last_known_line": 136,
       "doc_summary": "Result of fulltext BM25 search (ADR-54).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1031,7 +1031,7 @@
       "kind": "Enum",
       "name": "FulltextHitKind",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 111,
+      "last_known_line": 118,
       "doc_summary": "Target kind for fulltext hits (ADR-54).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1097,7 +1097,7 @@
       "kind": "Function",
       "name": "compensate_blob_delete",
       "last_known_file": "crates/smartfs-db/src/blobs.rs",
-      "last_known_line": 72,
+      "last_known_line": 110,
       "doc_summary": "Compensation delete when store.put fails after blob insertion (FIX-04, ADR-46).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1108,7 +1108,7 @@
       "kind": "Function",
       "name": "connect_pool",
       "last_known_file": "crates/smartfs-db/src/lib.rs",
-      "last_known_line": 55,
+      "last_known_line": 56,
       "doc_summary": "Establish a connection pool to the PostgreSQL database.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1152,8 +1152,19 @@
       "kind": "Function",
       "name": "dedup_check",
       "last_known_file": "crates/smartfs-db/src/blobs.rs",
-      "last_known_line": 84,
+      "last_known_line": 122,
       "doc_summary": "Check whether a blob with the given content hash already exists.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "e91d4a26-7b58-40cf-93e2-6d0af8b71539",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "delete_blob_if_unreferenced",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 228,
+      "doc_summary": "Drops one blob's inventory row, but only while it is still unreferenced.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -1174,7 +1185,7 @@
       "kind": "Function",
       "name": "get_blob",
       "last_known_file": "crates/smartfs-db/src/blobs.rs",
-      "last_known_line": 94,
+      "last_known_line": 135,
       "doc_summary": "Get a blob record by content hash.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1378,6 +1389,17 @@
       "tombstoned_reason": null
     },
     {
+      "id": "5f2a7c81-93e4-4b60-a7d8-1c05e3f9b247",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "insert_blob_with_sharing",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 37,
+      "doc_summary": "`insert_blob`, with the blob's dedup participation chosen by the caller (ADR-62).",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "e8a12345-bcde-4f01-2345-6789abcdef01",
       "crate_name": "smartfs-db",
       "kind": "Function",
@@ -1416,8 +1438,19 @@
       "kind": "Function",
       "name": "list_blob_digests",
       "last_known_file": "crates/smartfs-db/src/blobs.rs",
-      "last_known_line": 118,
+      "last_known_line": 159,
       "doc_summary": "Lists `(blob_id, content_hash)` pairs for the ADR-58 checksum scrub.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "4c8e0b73-2a95-4f18-bd60-e7139af5c284",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "list_unreferenced_blobs",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 196,
+      "doc_summary": "Blobs no `file_versions` row references any more (ADR-62 §Rozstrzygnięcia #4).",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -1473,6 +1506,17 @@
       "last_known_file": "crates/smartfs-db/src/preflight.rs",
       "last_known_line": 16,
       "doc_summary": "Proves a pooled connection is live by running `SELECT 1`.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "7a3b91e5-08d6-4c47-b1f0-52ce8d604a3b",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "private_blob_of_inode",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 251,
+      "doc_summary": "The private blob backing an inode's current version, if it has one.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -1548,7 +1592,7 @@
       "kind": "ImplBlock",
       "name": "std::fmt::Display for FulltextHitKind",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 117,
+      "last_known_line": 124,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1570,7 +1614,7 @@
       "kind": "Function",
       "name": "update_blob_compressed_size",
       "last_known_file": "crates/smartfs-db/src/blobs.rs",
-      "last_known_line": 49,
+      "last_known_line": 87,
       "doc_summary": "Update compressed size for a blob once store.put succeeds.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1840,6 +1884,17 @@
       "tombstoned_reason": null
     },
     {
+      "id": "1d7c5f04-8e93-4a26-b0d7-42f96cae3b18",
+      "crate_name": "smartfs-fuse",
+      "kind": "Struct",
+      "name": "CleanReport",
+      "last_known_file": "crates/smartfs-fuse/src/cleaner.rs",
+      "last_known_line": 47,
+      "doc_summary": "Outcome of one cleaning pass.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "b8a75f66-9325-4f8f-8281-bb89cdf58980",
       "crate_name": "smartfs-fuse",
       "kind": "ImplBlock",
@@ -2023,6 +2078,28 @@
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
       "last_known_line": 418,
       "doc_summary": "Caches the mapping between FUSE `ino` and database UUID.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "8b0e62a7-3d41-49fc-85b2-e0c7d1f4a539",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "clean_once",
+      "last_known_file": "crates/smartfs-fuse/src/cleaner.rs",
+      "last_known_line": 64,
+      "doc_summary": "Runs one pass. Returns what it did rather than logging and forgetting.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "3f6a80d2-95be-4c17-a3e8-71b40df9c2a6",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "cleaner_loop",
+      "last_known_file": "crates/smartfs-fuse/src/cleaner.rs",
+      "last_known_line": 119,
+      "doc_summary": "The cleaning loop, run during the filesystem's idle phase.",
       "tombstoned": false,
       "tombstoned_reason": null
     },

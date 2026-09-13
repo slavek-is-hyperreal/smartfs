@@ -2,7 +2,7 @@
 
 ← [Mapa ADR](../01-architecture.md) | Wynika z pomiaru: [PLAN §5c](../plans/PLAN-posix-parity-and-storage-policy.md) | Poprzednicy: [ADR-58](ADR-58-two-stage-cow-commit.md) (dwuetapowy commit), [ADR-60](ADR-60-plugin-architecture-rust-spirv.md) (polityka składowania z wtyczek), FIX-01 (dedup bez refcountów), FIX-03/FIX-04
 
-**Status:** Proponowany — **cztery Otwarte pytania blokują implementację** (§Otwarte pytania). Kierunek zaproponowany przez właściciela projektu 2026-09-13.
+**Status:** Przyjęty 2026-09-13. Kierunek zaproponowany przez właściciela projektu, cztery Otwarte pytania rozstrzygnięte na jego prośbę przez implementującego — patrz §Rozstrzygnięcia, gdzie zapisano również uzasadnienia, żeby dało się je później zakwestionować. Wdrożenie fazowe, patrz §Fazy.
 
 ---
 
@@ -29,11 +29,20 @@ Dodatkowa obserwacja z przeglądu kodu: **GC blobów nie istnieje.** FIX-01 zni�
 
 `inode_registry` ma już `compression_level SMALLINT` i `versioning_enabled BOOLEAN` — polityki podejmowane per plik, nie globalnie. `dedup_enabled BOOLEAN NOT NULL DEFAULT TRUE` dołącza do nich; wartość ustala wtyczka typu pliku przy tworzeniu inode'a (ADR-60, punkt „polityka składowania").
 
-### 2. Dedup wyłączony: zero zapytań do bazy na ścieżce zapisu
+### 2. Dedup wyłączony: blob prywatny
 
-Bez dedupu nie ma czego serializować, więc `insert_blob` znika ze ścieżki: hash → kompresja → `store.put` → znacznik → potwierdzenie. **43 ms schodzi natychmiast, bez leniwego dedupu i bez GC.**
+Blob takiego pliku jest **prywatny** — należy do dokładnie jednej wersji jednego inode'a i nie wchodzi do indeksu dedupu (`shared = FALSE`).
 
-Blob takiego pliku jest **prywatny**: należy do dokładnie jednej wersji jednego inode'a.
+**Sprostowanie wcześniejszej wersji tego punktu.** Pisałem tu, że przy wyłączonym dedupie `insert_blob` znika ze ścieżki zapisu i 43 ms schodzi natychmiast. **To przestało być prawdą po poprawce z punktu 4**: skoro każdy blob zachowuje wiersz w inwentarzu, to również prywatny wymaga `INSERT`-a — a mierzone 43 ms to koszt *autocommitu*, nie samej logiki dedupu.
+
+Właściwy rozkład jest taki, i jest czystszy:
+
+| co daje | skąd się bierze |
+|---|---|
+| zdjęcie 43 ms ze ścieżki zapisu | **leniwość** (punkt 5) — dla obu ustawień jednakowo |
+| gwarancja szybkiego kasowania | **prywatność** (punkty 3–4) — tylko przy `dedup_enabled = FALSE` |
+
+Te dwie rzeczy są ortogonalne. Wcześniej je zlepiłem.
 
 ### 3. Dedup wyłączony daje gwarancję szybkiego kasowania — i to jest jego główna wartość
 
@@ -105,12 +114,55 @@ Jego zadanie: znaleźć bloby, których nie referuje żaden wiersz `file_version
 - FIX-03 i FIX-04 tracą swoje uzasadnienie na ścieżce leniwej: ich sens polega na tym, że wiersz w `blobs` powstaje **przed** zapisem bajtów, więc crash zostawia wykrywalny „zatruty wiersz". Po odwróceniu crash zostawia osierocony plik bez wiersza — stan niewidoczny przez mount (Invariant #3) i sprzątany przez GC. To wygląda na **uproszczenie** semantyki crashowej, ale K1–K5 mierzą dokładnie ten obszar i muszą zostać przepisane, a nie założone.
 - GC-by-scan przestaje być teoretyczny i staje się warunkiem koniecznym.
 
-## Otwarte pytania — zatrzymać się i zapytać
+## Rozstrzygnięcia
 
-1. **Co jest domyślne dla pliku bez wtyczki?** `dedup_enabled = TRUE` oszczędza miejsce i odracza kasowanie; `FALSE` jest szybsze i przewidywalne. Wybór ustawia charakter systemu i nie powinien wyjść z przypadku.
-2. **Czy `dedup_enabled` można przełączyć po utworzeniu pliku, i co wtedy z istniejącymi wersjami?** Włączenie jest łatwe (przyszłe wersje wejdą do indeksu). Wyłączenie jest trudne: istniejący blob może być już współdzielony, więc gwarancja z punktu 3 nie obowiązuje wstecz — chyba że wymusimy kopię, czego cała ta konstrukcja unika.
-3. **Czy „szybkie kasowanie" znaczy `unlink()` kasujący plik synchronicznie?** Wtedy I/O wraca na ścieżkę kasowania, tylko z drugiej strony. Alternatywa: kasowanie natychmiastowe, ale wykonane przez drenaż — miejsce wraca w milisekundach, nie w mikrosekundach, za to `unlink()` zostaje szybki.
-4. **Czy GC powstaje przed tym, czy razem z tym?** Rekomendacja: **przed**. GC jest potrzebny tak czy owak (dziś nie istnieje, a bloby po każdej edycji już się gromadzą), a leniwy dedup bez niego to wyciek z dodatkowymi krokami.
+Rozstrzygnięte 2026-09-13 na wyraźną prośbę właściciela projektu („sam odpowiedz na 4 pytania"). Uzasadnienia zapisane, bo decyzja podjęta w zastępstwie musi dać się później podważyć na podstawie powodów, a nie autorytetu.
+
+### #1 — Domyślne `dedup_enabled = TRUE`
+
+Trzy powody, w kolejności wagi.
+
+**To zachowuje dzisiejsze zachowanie.** Dedup jest dziś bezwarunkowy. Domyślne `FALSE` znaczyłoby, że po aktualizacji system po cichu przestaje deduplikować i zużycie miejsca rośnie bez niczyjej decyzji. Zmiana ma być opt-out, nie opt-in.
+
+**Dedup jest konstytutywny dla SmartFS.** To magazyn adresowany treścią, w którym Root Invariant #2 tworzy nową wersję przy każdej zmianie. Zbiór wersji jednego pliku jest z natury pełen powtórzeń; wyłączenie dedupu domyślnie stawiałoby system przeciw własnemu projektowi.
+
+**Wybór nie dotyczy już szybkości zapisu** — po sprostowaniu w punkcie 2 leniwość zdejmuje 43 ms dla obu ustawień. Zostaje wyłącznie „szybkie kasowanie plus zmarnowane I/O na duplikatach" kontra „odroczone kasowanie plus oszczędność miejsca". Dla pliku, o którym nic nie wiadomo, drugie jest bezpieczniejszym domyślnym.
+
+Wtyczka typu pliku (ADR-60) ustawia `FALSE` tam, gdzie to ma sens — wideo, obrazy dysków, artefakty budowania — czyli tam, gdzie duplikaty są rzadkie, pliki duże, a natychmiastowe zwolnienie miejsca istotne.
+
+### #2 — Przełączanie wolno, ale nie działa wstecz; gwarancja jest własnością WERSJI, nie pliku
+
+`dedup_enabled` można zmienić w dowolnym momencie i dotyczy **wyłącznie wersji zapisanych po zmianie**. Nic nie jest przepisywane, nic nie jest kopiowane.
+
+Kluczowe następstwo, i to ono jest właściwą odpowiedzią: **„czy skasowanie zwolni miejsce" jest własnością konkretnego bloba (`blobs.shared`), nie flagi na inode'ie.** Wyłączenie dedupu na pliku, którego bieżąca wersja siedzi na blobie współdzielonym, nie czyni tego bloba prywatnym — i nie powinno, bo jedyną drogą byłaby kopia, której cała ta konstrukcja unika.
+
+Żeby to nie było cichą pułapką, stan musi być **obserwowalny**: `smartfs-cli status` na pliku pokazuje, czy jego bieżąca wersja leży na blobie prywatnym czy współdzielonym. Użytkownik przekonany, że ma gwarancję, której nie ma, jest gorszy niż użytkownik bez gwarancji.
+
+### #3 — Kasowanie bloba prywatnego jest synchroniczne w `unlink()`
+
+Rozważałem przerzucenie tego na drenaż, dla symetrii z zapisem. Odrzucone, bo argument nie wytrzymuje pomiaru: `unlink()` **już dziś** robi synchroniczne `DELETE FROM inode_registry`, czyli commit Postgresa — te same 27 ms. Dołożenie jednego `unlink(2)` na ext4 (dziesiątki mikrosekund, bez fsynca) jest przy tym szumem.
+
+Za synchronicznością przemawia też to, że gwarancja staje się **dosłowna** zamiast „prawdziwa po chwili". Cała wartość punktu 3 polega na przewidywalności; odroczenie o milisekundy nic nie kosztuje, ale wymaga tłumaczenia, kiedy dokładnie miejsce wraca.
+
+Blob współdzielony pozostaje nietknięty przy `unlink` — jego zwolnienie wymaga dowodu, że nikt go nie referuje, a to jest zadanie sprzątacza.
+
+### #4 — GC powstaje PRZED leniwym dedupem, jako warunek konieczny
+
+GC-by-scan nie istnieje w kodzie w ogóle, a **bloby przeciekają już dziś**, niezależnie od czegokolwiek w tym ADR-ze: skasowanie inode'a kasuje kaskadowo jego `file_versions`, a pliki blobów zostają na dysku na zawsze. Podobnie kompensacja z FIX-04 kasuje wiersz, nie plik.
+
+Leniwy dedup bez GC byłby wyciekiem z dodatkowymi krokami. Odwrotnie — GC jest użyteczny natychmiast i sam z siebie, jeszcze zanim cokolwiek stanie się leniwe.
+
+## Fazy
+
+Rozstrzygnięcia wyżej nie znaczą, że wszystko wchodzi naraz. Kolejność wynika z #4 i z tego, które kroki dają się zweryfikować dostępnymi dziś narzędziami.
+
+| faza | zawartość | ryzyko |
+|---|---|---|
+| **A** | migracja: klucz `blobs` na `blob_id`, `shared`, indeks częściowy, `inode_registry.dedup_enabled` | niskie, addytywne |
+| **B** | GC-by-scan + sprzątacz w fazie snu; `smartfs-cli` pokazuje prywatny/współdzielony | niskie, sam zysk |
+| **C** | `insert_blob` przenoszony do drenażu (leniwość) — **to zdejmuje 43 ms** | **wysokie: zmienia semantykę crashową, unieważnia FIX-03/FIX-04 i K1–K5** |
+
+Faza C jest świadomie ostatnia. Odwraca kolejność `insert_blob` → `store.put`, czyli dokładnie to, na czym stoją FIX-03 i FIX-04, i mierzą to punkty K1–K5 etapu 4 — który **dziś nie kończy jeszcze czystego przebiegu**. Wdrażanie zmiany semantyki crashowej, gdy jedyny instrument zdolny ją sprawdzić sam nie działa, byłoby zgadywaniem. Faza C czeka na zielony etap 4 i na przepisany §5.2 planu.
 
 ## Odniesienia
 

@@ -23,6 +23,13 @@ pub struct InodeRecord {
     pub on_prem: bool,
     pub compression_level: i16,
     pub versioning_enabled: bool,
+    /// Whether new versions of this file join the dedup index (ADR-62).
+    ///
+    /// `false` buys a guarantee: the blob is private, so `unlink` can free the
+    /// space at once instead of proving nobody else references it. Applies only
+    /// to versions written after the flag changes — whether a delete frees
+    /// space is a property of the blob (`blobs.shared`), not of this field.
+    pub dedup_enabled: bool,
     /// Last access time, maintained under `relatime` rules (ADR-61 point 3).
     pub atime: DateTime<Utc>,
     /// Last time the file's CONTENT changed. Metadata-only changes move
