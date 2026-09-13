@@ -847,9 +847,17 @@ impl Filesystem for SmartFsFuse {
                     let seq = self.pending.next_seq();
 
                     let commit = self.block_on(async move {
+                        // Phase timing for the write path. close() latency is the
+                        // number ADR-58 set out to change and the one stage 5
+                        // measures, and a single total tells you nothing about
+                        // which of six steps owns it. Instant::now() costs a few
+                        // nanoseconds against milliseconds of I/O, so this is
+                        // always collected; only the emit is level-gated.
+                        let t_start = std::time::Instant::now();
                         let record = smartfs_db::inode_get(&pool, inode_id).await?.ok_or_else(
                             || SmartFsError::NotFound(format!("Inode {inode_id} not found")),
                         )?;
+                        let t_lookup = t_start.elapsed();
 
                         let hash = smartfs_compress::hash_bytes(&data).0;
                         let size = data.len() as i64;
@@ -858,6 +866,7 @@ impl Filesystem for SmartFsFuse {
                         let compression_level = record.compression_level as i32;
 
                         // Step 1: Outside transaction
+                        let t_hash = t_start.elapsed();
                         let insert_result = smartfs_db::insert_blob(
                             &pool,
                             &hash,
@@ -867,6 +876,7 @@ impl Filesystem for SmartFsFuse {
                         )
                         .await?;
                         let blob_id = insert_result.blob_id;
+                        let t_dedup = t_start.elapsed();
 
                         let mut compressed_size = None;
                         if insert_result.inserted {
@@ -939,7 +949,22 @@ impl Filesystem for SmartFsFuse {
                             created_at: chrono::Utc::now().to_rfc3339(),
                         };
 
+                        let t_blob = t_start.elapsed();
                         pending.submit(&marker).await?;
+                        let t_total = t_start.elapsed();
+
+                        // One line, fixed field order, so stage 5 can aggregate
+                        // it without parsing prose.
+                        tracing::debug!(
+                            target: "smartfs::write_phases",
+                            "phases_us lookup={} hash={} dedup={} blob={} marker={} total={}",
+                            t_lookup.as_micros(),
+                            (t_hash - t_lookup).as_micros(),
+                            (t_dedup - t_hash).as_micros(),
+                            (t_blob - t_dedup).as_micros(),
+                            (t_total - t_blob).as_micros(),
+                            t_total.as_micros()
+                        );
 
                         Ok::<_, SmartFsError>(())
                     });

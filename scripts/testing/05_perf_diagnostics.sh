@@ -35,6 +35,11 @@ RES="$(results_dir stage5-perf)"
 BASELINE="${SMARTFS_REPO}/scripts/testing/perf-baseline.json"
 SAMPLES="${PERF_SAMPLES:-200}"
 
+# Debug level on the write-phase target only: the daemon logs one fixed-format
+# line per committed write, which section 1b aggregates. A single close()
+# latency number says which step is slow only by accident; six say it directly.
+export RUST_LOG="${RUST_LOG:-info,smartfs::write_phases=debug}"
+
 trap stop_daemon EXIT
 start_daemon "$SMARTFS_MOUNT" "$SMARTFS_STORE_PATH" "$SMARTFS_DB_URL" --no-semantic
 require_live_mount "$SMARTFS_MOUNT"
@@ -71,6 +76,35 @@ METRIC[close_latency_p95_ms]="$LAT_P95"
 METRIC[close_latency_p99_ms]="$LAT_P99"
 METRIC[close_latency_mean_ms]="$LAT_MEAN"
 pass "close() latency recorded: p50=${LAT_P50}ms p95=${LAT_P95}ms p99=${LAT_P99}ms"
+
+# ── 1b. where that latency actually goes ───────────────────────────────────
+info "1b where the write path spends its time"
+PHASE_LOG="${RESULTS_ROOT}/${_STAGE_NAME}/smartfsd.log"
+if grep -q "phases_us" "$PHASE_LOG" 2>/dev/null; then
+  # Median per phase, so one slow outlier cannot dominate the picture.
+  while IFS='=' read -r phase value; do
+    [[ -z "$phase" ]] && continue
+    METRIC["write_phase_${phase}_ms"]="$value"
+    log "  ${phase}: ${value} ms (median)"
+  done < <(
+    grep -o 'phases_us .*' "$PHASE_LOG" | python3 -c '
+import sys, statistics
+cols = {}
+for line in sys.stdin:
+    for field in line.split()[1:]:
+        if "=" not in field:
+            continue
+        k, v = field.split("=", 1)
+        if v.isdigit():
+            cols.setdefault(k, []).append(int(v))
+for k, vals in cols.items():
+    print(f"{k}={round(statistics.median(vals) / 1000, 3)}")
+'
+  )
+  pass "write path broken down into phases"
+else
+  note "no phase lines in ${PHASE_LOG}; the daemon may predate the instrumentation"
+fi
 
 # ── 2. queue drain: how far behind Postgres runs ───────────────────────────
 info "2  time for the pending queue to drain after the burst"
