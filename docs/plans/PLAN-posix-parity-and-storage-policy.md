@@ -162,6 +162,20 @@ Etap 4 zabija demona z założenia, a writer, który przeżyje unmount, otwiera 
 
 Zasada nadrzędna, z §7.3 planu testowego: **jeśli skrypt został zmieniony, żeby etap przeszedł, ta zmiana sama jest znaleziskiem i musi zostać zgłoszona przed wynikiem.** Dotyczy to również zmian wprowadzonych w trakcie pętli.
 
+## 6b. Zagrożenie: edytowanie wrappera w trakcie jego działania
+
+`scripts/run-great-smartfs-test.sh --watch` jest **działającym skryptem basha**, a bash doczytuje własny plik po offsecie bajtowym, nie wczytuje go w całości na starcie. Zmiana tego pliku w trakcie działania — `git commit`, `git checkout`, edytor — może sprawić, że interpreter wznowi wykonanie w środku innej instrukcji.
+
+W nocy z 13 września zmieniałem ten plik kilkakrotnie przy działającym watcherze i nic się nie stało. To było szczęście, nie poprawność: dowodem, że bash faktycznie doczytuje, jest to, że wybór podzbioru etapów (dodany w `46aa006`) **zadziałał w iteracji 4**, mimo że watcher wystartował z wersji sprzed tej zmiany.
+
+Z tego wynikają dwie zasady:
+
+1. **Nie zmieniaj `scripts/run-great-smartfs-test.sh`, dopóki watcher działa.** Dotyczy to również `git checkout` innego commita, co wyklucza klasyczny bisect przez przewijanie repozytorium w trakcie sesji pomiarowej.
+2. Trwała naprawa to samo-przekopiowanie: skrypt na starcie kopiuje się do katalogu tymczasowego i `exec`-uje kopię, po czym plik w repo przestaje być tym, co jest wykonywane. **Do zrobienia przy następnym ręcznym starcie**, nie w trakcie — bo sama ta zmiana jest tym zagrożeniem.
+
+Praktyczna konsekwencja dla bisectu wydajnościowego: zamiast przewijać commity, instrumentuj. Rozbicie `close()` na fazy (`590bbb2`) odpowiada „gdzie idą milisekundy" bez dotykania repozytorium i zostaje jako narzędzie.
+
+
 ## 7. Znaleziska otwarte
 
 - **Etap 4, Invariant #3 — nierozstrzygający.** 82 z 83 porażek to jedna klasa: po `kill -9` plik jest widoczny z treścią, która nie ma jeszcze wiersza `file_versions`, bo jego znacznik czeka w `pending/queue/`, a nakładka odczytu z ADR-58 go serwuje. §5.3 planu został pod to zrewidowany (najpierw quiesce), ale `04_crash_consistency_test.sh` nigdy nie dostał tej samej poprawki. Sprawdzian nie odróżnia dziś „zakolejkowane, zaraz się zacommituje" (legalne) od „widoczne, a nigdzie nie zapisane" (realne naruszenie). Do naprawy w skrypcie, ze zgłoszeniem.
