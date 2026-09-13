@@ -116,6 +116,25 @@ impl SmartFsFuse {
         })
     }
 
+    /// @id: b40f7a92-1c6e-4d38-85a0-e2947fb60cd1
+    /// Records an access for `relatime`, off the reply path (ADR-61 point 6).
+    ///
+    /// Spawned rather than awaited on purpose: a read that waits on a Postgres
+    /// UPDATE to record that it happened is worse than an `atime` a few
+    /// milliseconds late. The `relatime` predicate lives in SQL, so most calls
+    /// update no rows at all and cost one cheap statement.
+    ///
+    /// Failure is logged and dropped. `atime` is advisory metadata; losing an
+    /// update must never turn a successful read into an error.
+    fn note_access(&self, inode_id: Uuid) {
+        let pool = self.pool.clone();
+        self.rt_handle.spawn(async move {
+            if let Err(e) = smartfs_db::inode_touch_atime_relatime(&pool, inode_id).await {
+                tracing::debug!("relatime update for {inode_id} failed, ignoring: {e}");
+            }
+        });
+    }
+
     /// @id: 7825d6e7-f809-41ab-b2c3-d4e5f6071829
     /// Returns a reference to the shared `FuseStateManager`.
     pub fn state(&self) -> &Arc<FuseStateManager> {
@@ -257,8 +276,8 @@ impl Filesystem for SmartFsFuse {
         uid: Option<u32>,
         gid: Option<u32>,
         size: Option<u64>,
-        _atime: Option<TimeOrNow>,
-        _mtime: Option<TimeOrNow>,
+        atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
         _ctime: Option<std::time::SystemTime>,
         fh: Option<u64>,
         _crtime: Option<std::time::SystemTime>,
@@ -416,6 +435,26 @@ impl Filesystem for SmartFsFuse {
                 }
             }
         }
+
+            // ADR-61: utimensat used to be a silent no-op — these arguments were
+            // accepted and dropped, so the call returned 0 and nothing changed.
+            // UTIME_OMIT arrives as None and must leave the field alone;
+            // UTIME_NOW arrives as TimeOrNow::Now.
+            let to_utc = |t: TimeOrNow| -> chrono::DateTime<chrono::Utc> {
+                match t {
+                    TimeOrNow::Now => chrono::Utc::now(),
+                    TimeOrNow::SpecificTime(st) => chrono::DateTime::<chrono::Utc>::from(st),
+                }
+            };
+            if atime.is_some() || mtime.is_some() {
+                smartfs_db::inode_set_times(
+                    &pool,
+                    record.id,
+                    atime.map(to_utc),
+                    mtime.map(to_utc),
+                )
+                .await?;
+            }
 
             let updated = smartfs_db::inode_update_attrs(
                 &pool,
@@ -663,6 +702,9 @@ impl Filesystem for SmartFsFuse {
             if let Err(e) = state.ensure_buffer(fh, || self.load_current_bytes(ino)) {
                 reply.error(error_to_errno(&e));
                 return;
+            }
+            if let Some(inode_id) = self.state.get_handle(fh).map(|h| h.inode_id) {
+                self.note_access(inode_id);
             }
             match self.state.get_handle(fh).and_then(|h| h.buffer) {
                 Some(buf) => buf,

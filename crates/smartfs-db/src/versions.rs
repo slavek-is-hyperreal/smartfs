@@ -215,7 +215,7 @@ pub async fn cow_commit_with_id(
     sqlx::query(
         r#"
         UPDATE inode_registry
-        SET current_blob_id = $1, size = $2, updated_at = NOW()
+        SET current_blob_id = $1, size = $2, mtime = NOW(), updated_at = NOW()
         WHERE id = $3
         "#,
     )
@@ -226,6 +226,8 @@ pub async fn cow_commit_with_id(
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit update inode: {e}")))?;
 
+    // ADR-61: a content change moves mtime, and updated_at (POSIX ctime) with
+    // it. atime is deliberately untouched — writing is not reading.
     // NOTE: is_current is NEVER touched in cow_commit (FIX-02).
 
     tx.commit()

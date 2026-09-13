@@ -25,7 +25,8 @@ pub use embeddings::{
     insert_embedding_1024_qwen, insert_embedding_384, insert_embedding_768,
 };
 pub use inodes::{
-    inode_create, inode_create_with_rdev, inode_delete, inode_get, inode_list_children, inode_lookup,
+    inode_create, inode_create_with_rdev, inode_delete, inode_set_times,
+    inode_touch_atime_relatime, inode_touch_mtime, inode_get, inode_list_children, inode_lookup,
     inode_lookup_by_ino, inode_rename, inode_set_index_mode, inode_update_attrs,
 };
 pub use models::{

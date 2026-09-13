@@ -23,6 +23,11 @@ pub struct InodeRecord {
     pub on_prem: bool,
     pub compression_level: i16,
     pub versioning_enabled: bool,
+    /// Last access time, maintained under `relatime` rules (ADR-61 point 3).
+    pub atime: DateTime<Utc>,
+    /// Last time the file's CONTENT changed. Metadata-only changes move
+    /// `updated_at`, which serves as POSIX `ctime`, and never this (ADR-61).
+    pub mtime: DateTime<Utc>,
     /// Device number for `S_IFCHR`/`S_IFBLK`, 0 for every other type (ADR-59).
     ///
     /// `i64` because Linux `dev_t` is 64-bit: `makedev()` with a large minor

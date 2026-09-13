@@ -38,8 +38,8 @@ pub struct MigrationMarker {
 }
 
 /// @id: 19443a9e-1ea7-4fef-b2cb-6be74c03340c
-/// The `001`–`007` markers, derived from `migrations/0*.sql`.
-pub const MIGRATION_MARKERS: [MigrationMarker; 7] = [
+/// The `001`–`008` markers, derived from `migrations/0*.sql`.
+pub const MIGRATION_MARKERS: [MigrationMarker; 8] = [
     MigrationMarker { id: "001", table: "inode_registry", column: None },
     MigrationMarker { id: "002", table: "embedding_models", column: None },
     MigrationMarker { id: "003", table: "embeddings_768", column: None },
@@ -47,6 +47,7 @@ pub const MIGRATION_MARKERS: [MigrationMarker; 7] = [
     MigrationMarker { id: "005", table: "consolidation_thresholds", column: None },
     MigrationMarker { id: "006", table: "file_versions", column: Some("search_text") },
     MigrationMarker { id: "007", table: "inode_registry", column: Some("rdev") },
+    MigrationMarker { id: "008", table: "inode_registry", column: Some("mtime") },
 ];
 
 /// @id: 70559553-7e64-4d66-8158-916855455173

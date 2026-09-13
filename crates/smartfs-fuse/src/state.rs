@@ -30,8 +30,11 @@ pub fn inode_to_file_attr(record: &InodeRecord) -> FileAttr {
         record.nlink.max(1) as u32
     };
 
-    let atime = system_time_from_datetime(&record.updated_at);
-    let mtime = system_time_from_datetime(&record.updated_at);
+    // ADR-61: four distinct POSIX facts, no longer collapsed into updated_at.
+    // ctime stays updated_at because POSIX defines it as "last metadata change",
+    // which is exactly what that column already means.
+    let atime = system_time_from_datetime(&record.atime);
+    let mtime = system_time_from_datetime(&record.mtime);
     let ctime = system_time_from_datetime(&record.updated_at);
     let crtime = system_time_from_datetime(&record.created_at);
 
@@ -429,6 +432,8 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            atime: now,
+            mtime: now,
             rdev: 0,
         };
 
@@ -464,6 +469,8 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            atime: now,
+            mtime: now,
             rdev: 0,
         };
 
@@ -591,6 +598,8 @@ mod file_type_tests {
             compression_level: 3,
             versioning_enabled: true,
             rdev,
+            atime: now,
+            mtime: now,
         }
     }
 

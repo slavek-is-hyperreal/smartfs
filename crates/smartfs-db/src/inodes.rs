@@ -1,4 +1,5 @@
 use crate::models::InodeRecord;
+use chrono::{DateTime, Utc};
 use smartfs_schema::error::{Result, SmartFsError};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -14,7 +15,7 @@ pub async fn inode_lookup(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev
+               compression_level, versioning_enabled, rdev, atime, mtime
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1 AND name = $2
         "#,
@@ -33,7 +34,7 @@ pub async fn inode_lookup_by_ino(pool: &PgPool, ino: i64) -> Result<Option<Inode
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev
+               compression_level, versioning_enabled, rdev, atime, mtime
         FROM inode_registry
         WHERE ino = $1
         "#,
@@ -51,7 +52,7 @@ pub async fn inode_get(pool: &PgPool, id: Uuid) -> Result<Option<InodeRecord>> {
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev
+               compression_level, versioning_enabled, rdev, atime, mtime
         FROM inode_registry
         WHERE id = $1
         "#,
@@ -105,7 +106,7 @@ pub async fn inode_create_with_rdev(
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled, rdev
+                  compression_level, versioning_enabled, rdev, atime, mtime
         "#,
     )
     .bind(parent_id)
@@ -141,7 +142,7 @@ pub async fn inode_list_children(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled, rdev
+               compression_level, versioning_enabled, rdev, atime, mtime
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1
         ORDER BY ino ASC
@@ -174,7 +175,7 @@ pub async fn inode_update_attrs(
         WHERE id = $1
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled, rdev
+                  compression_level, versioning_enabled, rdev, atime, mtime
         "#,
     )
     .bind(id)
@@ -278,5 +279,79 @@ pub async fn inode_set_index_mode(pool: &PgPool, id: Uuid) -> Result<()> {
     .await
     .map_err(|e| SmartFsError::Db(format!("inode_set_index_mode error: {e}")))?;
 
+    Ok(())
+}
+
+/// @id: 8d64b2f1-70ae-4c39-91d5-2be0f847a3c6
+/// Sets the POSIX timestamps POSIX lets a caller set (ADR-61).
+///
+/// `atime` and `mtime` only. `ctime` is `updated_at` and is deliberately not a
+/// parameter: POSIX forbids setting it through `utimensat`, and the cheapest
+/// way to guarantee that is to give nobody a way to ask.
+///
+/// `None` means "leave alone", which is exactly `UTIME_OMIT`.
+pub async fn inode_set_times(
+    pool: &PgPool,
+    id: Uuid,
+    atime: Option<DateTime<Utc>>,
+    mtime: Option<DateTime<Utc>>,
+) -> Result<InodeRecord> {
+    sqlx::query_as::<_, InodeRecord>(
+        r#"
+        UPDATE inode_registry
+        SET atime = COALESCE($2, atime),
+            mtime = COALESCE($3, mtime),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
+                  created_at, updated_at, current_blob_id, backend_id, on_prem,
+                  compression_level, versioning_enabled, rdev, atime, mtime
+        "#,
+    )
+    .bind(id)
+    .bind(atime)
+    .bind(mtime)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| SmartFsError::Db(format!("inode_set_times error: {e}")))
+}
+
+/// @id: c07e35a9-4d81-4b6f-a2e3-95f18cd0b724
+/// Records an access under `relatime` rules, returning whether it wrote.
+///
+/// Updates `atime` only when it is older than `mtime` or `ctime`, or older than
+/// a day — the rule Linux has used by default since 2.6.30. Strict `atime`
+/// would turn every read of this filesystem into a Postgres write, which is
+/// worse here than on an ordinary filesystem, not merely as bad (ADR-61 §3).
+///
+/// The predicate lives in SQL so the decision and the write are one statement:
+/// evaluating it in the daemon would need a read first, which is the round-trip
+/// this is trying to avoid.
+pub async fn inode_touch_atime_relatime(pool: &PgPool, id: Uuid) -> Result<bool> {
+    let updated = sqlx::query(
+        r#"
+        UPDATE inode_registry
+        SET atime = NOW()
+        WHERE id = $1
+          AND (atime < mtime OR atime < updated_at OR atime < NOW() - INTERVAL '1 day')
+        "#,
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| SmartFsError::Db(format!("inode_touch_atime_relatime error: {e}")))?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// @id: 2a91f6c4-8b03-4e57-bd28-6cf094a1e735
+/// Records a content change: `mtime` and, implicitly, `ctime`.
+///
+/// Never touches `atime` — writing is not reading (ADR-61 point 5).
+pub async fn inode_touch_mtime(pool: &PgPool, id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE inode_registry SET mtime = NOW(), updated_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| SmartFsError::Db(format!("inode_touch_mtime error: {e}")))?;
     Ok(())
 }
