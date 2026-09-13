@@ -47,6 +47,30 @@ fi
 [[ -x "${PJD_DIR}/pjdfstest" ]] || die "pjdfstest binary still missing after build"
 pass "pjdfstest binary built"
 
+# failure_ids <tap-file> -> stable "<suite>/<file>.t:<n>" identifiers, one per line.
+#
+# The obvious extraction — strip "not ok N - " and keep the description — does
+# not work, and quietly. pjdfstest names every file it creates with a fresh
+# random suffix, so a description reads
+#
+#   tried 'mkfifo pjdfstest_9a02…b201', expected 0, got EOPNOTSUPP
+#
+# and never repeats between runs. 132 of 184 entries looked like that, which
+# means pjdfstest-expected-failures.txt could never match them and "NEW
+# failures" was always ~everything. The plan's finish line — every failure
+# classified, unjustified entries fail the stage — was unreachable as written.
+#
+# The test file plus the assertion number is stable: pjdfstest runs a fixed
+# sequence, so rename/09.t:24 asserts the same thing every time.
+failure_ids() {
+  awk '
+    match($0, /tests\/([a-z0-9_]+\/[0-9]+\.t)/, m) { cur = m[1]; next }
+    /^not ok [0-9]+/ {
+      if (cur != "") { n = $3; sub(/[^0-9].*$/, "", n); print cur ":" n }
+    }
+  ' "$1" | sort -u
+}
+
 # run_suite <label> <dir-to-test> -> writes <label>.tap, echoes "pass fail"
 run_suite() {
   local label="$1" target="$2"
@@ -75,8 +99,7 @@ pass "ext4 baseline: ${EXT4_OK} ok, ${EXT4_FAIL} not ok"
 
 # Tests that already fail on plain ext4 are environment problems; record their
 # names so they can be excluded from the SmartFS comparison.
-grep -E '^not ok ' "${RES}/ext4-baseline.tap" \
-  | sed -E 's/^not ok +[0-9]+ +-? *//' | sort -u > "${RES}/ext4-known-bad.txt" || true
+failure_ids "${RES}/ext4-baseline.tap" > "${RES}/ext4-known-bad.txt" || true
 
 # ── SmartFS run ─────────────────────────────────────────────────────────────
 trap stop_daemon EXIT
@@ -90,8 +113,11 @@ read -r FS_OK FS_FAIL <<<"$(run_suite smartfs "$SMARTFS_MOUNT")"
        FAILURE, never a pass. See ${RES}/smartfs.tap"
 pass "SmartFS run completed: ${FS_OK} ok, ${FS_FAIL} not ok"
 
-grep -E '^not ok ' "${RES}/smartfs.tap" \
-  | sed -E 's/^not ok +[0-9]+ +-? *//' | sort -u > "${RES}/smartfs-failures.txt" || true
+failure_ids "${RES}/smartfs.tap" > "${RES}/smartfs-failures.txt" || true
+
+# Keep the human-readable diagnostics alongside the ids, so triage does not
+# require re-reading the raw TAP to find out what a given id actually did.
+grep -E '^not ok ' "${RES}/smartfs.tap" > "${RES}/smartfs-failures-verbose.txt" || true
 
 # ── triage ──────────────────────────────────────────────────────────────────
 info "triage"
@@ -100,7 +126,12 @@ if [[ ! -f "$EXPECTED_FAILURES" ]]; then
   cat > "$EXPECTED_FAILURES" <<'EOF'
 # pjdfstest expected failures for SmartFS.
 #
-# Format:  <test name><TAB># <category>: <one-line justification>
+# Format:  <suite>/<file>.t:<n><TAB># <category>: <one-line justification>
+#          e.g.  link/00.t:12\t# LIMITATION: hardlinks unsupported, see ADR-59 point 8
+#
+# Identified by test file and assertion number, not by the failure text:
+# pjdfstest embeds a fresh random filename in every message, so text never
+# repeats between runs. See failure_ids() in 02_run_pjdfstest.sh.
 # Category is exactly one of:
 #     LIMITATION   - intentional, documented SmartFS MVP limitation
 #     FUSE         - inherent to FUSE, outside SmartFS's control
