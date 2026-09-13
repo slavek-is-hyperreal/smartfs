@@ -74,11 +74,26 @@ pass "close() latency recorded: p50=${LAT_P50}ms p95=${LAT_P95}ms p99=${LAT_P99}
 
 # ── 2. queue drain: how far behind Postgres runs ───────────────────────────
 info "2  time for the pending queue to drain after the burst"
+# Deliberately NOT lib_common's quiesce_queue: that one records a [FAIL] when
+# the queue will not drain, which is right for a correctness stage and wrong
+# here. A slow drain is the measurement, not a verdict. This stage waits far
+# longer and reports what it saw.
+DRAIN_Q="${SMARTFS_STORE_PATH}/pending/queue"
 DRAIN_T0="$(ns_now)"
-quiesce_queue "$SMARTFS_STORE_PATH" || true
-DRAIN_MS="$(python3 -c "print(($(ns_now) - $DRAIN_T0) / 1e6)")"
+DRAIN_WAITED=0
+while (( DRAIN_WAITED < 1200 )); do            # up to 60s at 50ms
+  [[ ! -d "$DRAIN_Q" || -z "$(ls -A "$DRAIN_Q" 2>/dev/null)" ]] && break
+  sleep 0.05; DRAIN_WAITED=$((DRAIN_WAITED + 1))
+done
+DRAIN_MS="$(python3 -c "print(round(($(ns_now) - $DRAIN_T0) / 1e6, 1))")"
 METRIC[queue_drain_ms]="$DRAIN_MS"
-pass "queue drained in ${DRAIN_MS}ms after ${SAMPLES} writes"
+if (( DRAIN_WAITED >= 1200 )); then
+  METRIC[queue_drained_fully]=0
+  note "queue still had $(ls -A "$DRAIN_Q" 2>/dev/null | wc -l) marker(s) after 60s — recorded, not failed"
+else
+  METRIC[queue_drained_fully]=1
+fi
+pass "queue drain after ${SAMPLES} writes: ${DRAIN_MS}ms"
 
 # ── 3. sequential throughput, compressible and incompressible ──────────────
 # Both, because ADR-59's whole premise is that general-purpose compression is
