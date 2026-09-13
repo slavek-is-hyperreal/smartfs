@@ -46,11 +46,23 @@ Metą jest to, czego §3 planu testowego i tak wymaga:
 
 Wpis bez uzasadnienia oblewa etap 2 celowo. Plik jest dziś pusty (sam nagłówek), więc wszystkie 838 są w tej chwili niezaklasyfikowane.
 
+## 2b. Postęp (aktualizowane w miarę pomiarów)
+
+| pozycja | stan |
+|---|---|
+| [ADR-59](../adr/ADR-59-posix-special-file-types.md) — typy specjalne POSIX | **zaimplementowany** 2026-09-13, migracja 007; predykcja: ~3000 porażek mniej |
+| [ADR-60](../adr/ADR-60-plugin-architecture-rust-spirv.md) — architektura wtyczek | **proponowany**, trzy Otwarte pytania blokują kod |
+| klasa „`lstat` zwraca inode zamiast ENOENT" (360) | zdiagnozowana częściowo — opóźniony unlink z ADR-16 **nie** tłumaczy tych przypadków, bo dla zamkniętego pliku wiersz znika natychmiast. Do zbadania na świeżym TAP-ie |
+| `expected-failures.txt` | nadal pusty; klasyfikacja **po** pomiarze ADR-59, nie przed |
+| pierwszy przebieg `generic/` | nie wykonany |
+
 ## 3. Kolejność prac
 
-1. **`rename`** — 1967 porażek. Największy pojedynczy zysk w całym projekcie.
-2. **`chown`** — 847. Rozstrzygnąć, ile z tego jest FUSE-inherent pod `DefaultPermissions`, zanim zacznie się kodować.
-3. **Klasyfikacja reszty** — `link` i `mkfifo` (275) to prawdopodobnie legalne `LIMITATION` do wpisania z uzasadnieniem, nie do naprawy.
+> **Skorygowane 2026-09-13 po analizie przyczyn.** Pierwsza wersja tej listy zaczynała się od „`rename` — 1967 porażek, największy pojedynczy zysk". To było grupowanie po **katalogu testowym**, nie po **przyczynie**, i było mylące: z tych 1967 tylko 30 to `rename` faktycznie zwracające zły wynik, reszta to kaskada `ENOENT` po nieudanym utworzeniu pliku nieobsługiwanego typu. To samo dotyczyło `chown`. Uzasadnienie i liczby: [ADR-59 §Kontekst](../adr/ADR-59-posix-special-file-types.md).
+
+1. **Typy plików POSIX** — [ADR-59](../adr/ADR-59-posix-special-file-types.md), zrobione. ~81% porażek wywodzi się z ich braku.
+2. **Klasa „plik nie zniknął"** (360× `lstat` zwraca inode tam, gdzie test oczekuje `ENOENT`) — pierwszy realny błąd, który po ADR-59 przestaje być przykryty szumem.
+3. **Klasyfikacja reszty** — hardlinki (`link`) to `LIMITATION` z uzasadnieniem w [ADR-59 punkt 8](../adr/ADR-59-posix-special-file-types.md), nie do naprawy: licznik dowiązań przy CoW dotyka Root Invariant #2 i #3, a to ~53 porażki.
 4. **Pierwszy przebieg `generic/`** — kilka godzin, nigdy nie wykonany. Do tego czasu nie wiemy, czego nie wiemy.
 5. **Baseline wydajności** — etap 5, patrz §5.
 6. **ADR-59** — polityka składowania z wtyczek, §4.
