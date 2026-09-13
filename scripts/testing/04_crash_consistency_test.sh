@@ -102,7 +102,7 @@ reset_scratch() {
     psql "$CRASH_URL" -qX -v ON_ERROR_STOP=1 -f "$m" >>"${RES}/migrate.log" 2>&1 \
       || die "migration $(basename "$m") failed on the scratch database"
   done
-  rm -rf "${CRASH_STORE:?}"; mkdir -p "$CRASH_STORE"
+  rm -rf "${CRASH_STORE:?}"; mkdir -p "$CRASH_STORE" "$CRASH_MOUNT"
 }
 
 # Snapshot every blob file's digest. Invariant #2 says content-addressed blobs

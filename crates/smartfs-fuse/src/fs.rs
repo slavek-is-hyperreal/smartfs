@@ -227,6 +227,13 @@ impl Filesystem for SmartFsFuse {
         _flags: Option<u32>,
         reply: ReplyAttr,
     ) {
+        if let Some(new_size) = size {
+            if new_size > 2 * 1024 * 1024 * 1024 {
+                reply.error(libc::EFBIG);
+                return;
+            }
+        }
+
         let pool = self.pool.clone();
         let store = self.store.clone();
         let state = self.state.clone();

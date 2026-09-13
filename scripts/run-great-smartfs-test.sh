@@ -113,7 +113,7 @@ info "daemon logs     ${XFS_LOG_DIR}            (pool)"
 info "cargo           $(command -v cargo || echo 'NOT FOUND')"
 command -v cargo >/dev/null || { bad "cargo not on PATH even after adding ${CARGO_HOME}/bin"; exit 1; }
 
-mkdir -p "$TMPDIR" "$XFS_LOG_DIR" "$RESULTS_ROOT" "$SMARTFS_STORE_PATH" "$SMARTFS_MOUNT"
+mkdir -p "$TMPDIR" "$XFS_LOG_DIR" "$RESULTS_ROOT" "$SMARTFS_STORE_PATH" "$SMARTFS_MOUNT" /mnt/smartfs-crash
 chmod 1777 "$TMPDIR"
 
 # xfstests' check-smartfs wrapper hardcodes /var/log/smartfs-xfs-*.log, and /

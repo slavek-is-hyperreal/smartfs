@@ -109,13 +109,23 @@ pub async fn cow_commit_with_id(
         .map_err(|e| SmartFsError::Db(format!("cow_commit begin tx: {e}")))?;
 
     // 1. Lock inode to serialize version increment
-    let _: Uuid = sqlx::query_scalar(
+    let locked_inode: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM inode_registry WHERE id = $1 FOR UPDATE",
     )
     .bind(inode_id)
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit lock inode: {e}")))?;
+
+    if locked_inode.is_none() {
+        // Inode was deleted (unlinked) while the write was pending.
+        // Committing to a deleted inode is impossible and unnecessary.
+        return Ok(CowCommitOutcome {
+            version_id,
+            version_number: 0,
+            inserted: false,
+        });
+    }
 
     // 2. Next version number
     let next_ver: i32 = sqlx::query_scalar(

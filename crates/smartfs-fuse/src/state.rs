@@ -202,8 +202,11 @@ impl FuseStateManager {
             .get_mut(&fh)
             .ok_or_else(|| SmartFsError::NotFound(format!("File handle {fh} not found")))?;
 
+        let end = offset.saturating_add(data.len());
+        if end > 2 * 1024 * 1024 * 1024 {
+            return Err(SmartFsError::Io(std::io::Error::from_raw_os_error(libc::EFBIG)));
+        }
         let buffer = handle.buffer.get_or_insert_with(Vec::new);
-        let end = offset + data.len();
         if end > buffer.len() {
             buffer.resize(end, 0);
         }
@@ -215,6 +218,9 @@ impl FuseStateManager {
     /// @id: 5c03b4c5-d6e7-4f80-91a2-b3c4d5e6f708
     /// Truncate or resize the per-fd memory buffer to `new_size` without creating a version.
     pub fn truncate_handle(&self, fh: u64, new_size: usize) -> Result<()> {
+        if new_size > 2 * 1024 * 1024 * 1024 {
+            return Err(SmartFsError::Io(std::io::Error::from_raw_os_error(libc::EFBIG)));
+        }
         let mut handles = self.handles.write().expect("handles lock poisoned");
         let handle = handles
             .get_mut(&fh)

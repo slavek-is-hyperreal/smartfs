@@ -102,7 +102,7 @@ pub fn check_registry_consistency(crates_root: &Path, docs_root: &Path) -> Resul
 W plikach `.md` pod `docs/` symbol jest linkowany tak:
 
 ```markdown
-Zobacz implementację [`consolidation_supervisor`](symbol://6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c45)
+Zobacz implementację [`consolidation_supervisor`](symbol://6b2d4e18-3f77-4a90-9c11-8a5f0d2e7c44)
 ```
 
 `symbol://<uuid>` nie jest realnym URI rozwiązywanym przez przeglądarkę — jest rozwiązywany przez `smartfs-docgen resolve` (CLI) albo przez wtyczkę edytora, która na żądanie zamienia go na aktualne `crates/smartfs-semantic/src/consolidate.rs:47` i tam przeskakuje. Dokumentacja w repo commituje `symbol://`, nigdy zamrożonego `plik:linia` — to jest cała różnica, która sprawia, że link przeżywa refaktoryzację.
