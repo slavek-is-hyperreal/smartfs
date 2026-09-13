@@ -47,6 +47,7 @@ fn test_inode_attribute_conversion_invariants() {
         on_prem: true,
         compression_level: 3,
         versioning_enabled: true,
+        rdev: 0,
     };
 
     let file_attr = inode_to_file_attr(&file_record);
@@ -79,6 +80,7 @@ fn test_inode_attribute_conversion_invariants() {
         on_prem: true,
         compression_level: 3,
         versioning_enabled: true,
+        rdev: 0,
     };
 
     let dir_attr = inode_to_file_attr(&dir_record);

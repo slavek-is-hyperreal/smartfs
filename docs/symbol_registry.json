@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T13:19:20.986488142Z",
+  "generated_at": "2026-09-13T14:51:59.993558112Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -822,7 +822,7 @@
       "kind": "Function",
       "name": "check_schema",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 197,
+      "last_known_line": 198,
       "doc_summary": "Step 6 — schema sanity check. Never issues DDL (Root Invariant #4).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -833,7 +833,7 @@
       "kind": "Function",
       "name": "column_exists",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 255,
+      "last_known_line": 256,
       "doc_summary": "Reports whether `table.column` exists in the `public` schema.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -844,7 +844,7 @@
       "kind": "Function",
       "name": "connect_and_probe_db",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 177,
+      "last_known_line": 178,
       "doc_summary": "Step 5 — connect the pool and prove the connection with `SELECT 1`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -866,7 +866,7 @@
       "kind": "Function",
       "name": "is_mountpoint",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 88,
+      "last_known_line": 89,
       "doc_summary": "Reports whether `path` appears as a mount target in `/proc/self/mountinfo`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -877,7 +877,7 @@
       "kind": "Function",
       "name": "mountinfo_fstype",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 98,
+      "last_known_line": 99,
       "doc_summary": "Returns the filesystem type `/proc/self/mountinfo` records for `path`, if it",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -888,7 +888,7 @@
       "kind": "Function",
       "name": "open_store",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 267,
+      "last_known_line": 268,
       "doc_summary": "Step 7 — open the blob store handle and prove it can reach the backend.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -910,7 +910,7 @@
       "kind": "Function",
       "name": "table_exists",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 247,
+      "last_known_line": 248,
       "doc_summary": "Reports whether `table` exists in the `public` schema.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -921,7 +921,7 @@
       "kind": "Function",
       "name": "unescape_mountinfo",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 128,
+      "last_known_line": 129,
       "doc_summary": "Decodes the octal escapes `/proc/self/mountinfo` uses in path fields.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -932,7 +932,7 @@
       "kind": "Function",
       "name": "validate_mountpoint",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 54,
+      "last_known_line": 55,
       "doc_summary": "Step 3 — validate the mountpoint: exists, is a directory, is empty, and is",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -943,7 +943,7 @@
       "kind": "Function",
       "name": "validate_store_path",
       "last_known_file": "crates/smartfs-daemon/src/startup.rs",
-      "last_known_line": 150,
+      "last_known_line": 151,
       "doc_summary": "Step 4 — validate the store path: exists, is a directory, is writable",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -954,7 +954,7 @@
       "kind": "Struct",
       "name": "AstNodeInsert",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 89,
+      "last_known_line": 94,
       "doc_summary": "Parameters for inserting a new AST node.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -965,7 +965,7 @@
       "kind": "Struct",
       "name": "AstNodeRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 74,
+      "last_known_line": 79,
       "doc_summary": "Stored AST node record from `ast_nodes`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -976,7 +976,7 @@
       "kind": "Struct",
       "name": "BlobInsertResult",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 66,
+      "last_known_line": 71,
       "doc_summary": "Result of atomic blob insertion (FIX-01, FIX-03, FIX-04).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -987,7 +987,7 @@
       "kind": "Struct",
       "name": "BlobRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 54,
+      "last_known_line": 59,
       "doc_summary": "Content-addressed blob record from `blobs`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1009,7 +1009,7 @@
       "kind": "Struct",
       "name": "FileVersionRecord",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 31,
+      "last_known_line": 36,
       "doc_summary": "File version record from `file_versions`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1020,7 +1020,7 @@
       "kind": "Struct",
       "name": "FulltextHit",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 119,
+      "last_known_line": 124,
       "doc_summary": "Result of fulltext BM25 search (ADR-54).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1031,7 +1031,7 @@
       "kind": "Enum",
       "name": "FulltextHitKind",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 101,
+      "last_known_line": 106,
       "doc_summary": "Target kind for fulltext hits (ADR-54).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1224,12 +1224,23 @@
       "tombstoned_reason": null
     },
     {
+      "id": "3b9f47c1-6e20-4d85-a0f3-58d1cb2e7940",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "inode_create_with_rdev",
+      "last_known_file": "crates/smartfs-db/src/inodes.rs",
+      "last_known_line": 92,
+      "doc_summary": "Creates an inode of any POSIX type, carrying a device number (ADR-59).",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "bb4552cf-a871-4a3d-a567-96a8e8e788bc",
       "crate_name": "smartfs-db",
       "kind": "Function",
       "name": "inode_delete",
       "last_known_file": "crates/smartfs-db/src/inodes.rs",
-      "last_known_line": 98,
+      "last_known_line": 125,
       "doc_summary": "Delete an inode by UUID.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1251,7 +1262,7 @@
       "kind": "Function",
       "name": "inode_list_children",
       "last_known_file": "crates/smartfs-db/src/inodes.rs",
-      "last_known_line": 109,
+      "last_known_line": 136,
       "doc_summary": "List all direct children of a directory inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1284,7 +1295,7 @@
       "kind": "Function",
       "name": "inode_rename",
       "last_known_file": "crates/smartfs-db/src/inodes.rs",
-      "last_known_line": 165,
+      "last_known_line": 192,
       "doc_summary": "Atomic rename of an inode, removing colliding target if present (ADR-31, §3.6).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1295,7 +1306,7 @@
       "kind": "Function",
       "name": "inode_set_index_mode",
       "last_known_file": "crates/smartfs-db/src/inodes.rs",
-      "last_known_line": 241,
+      "last_known_line": 268,
       "doc_summary": "Set an inode to index mode (versioning_enabled = FALSE, on_prem = FALSE)",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1306,7 +1317,7 @@
       "kind": "Function",
       "name": "inode_update_attrs",
       "last_known_file": "crates/smartfs-db/src/inodes.rs",
-      "last_known_line": 131,
+      "last_known_line": 158,
       "doc_summary": "Update POSIX attributes of an inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1504,7 +1515,7 @@
       "kind": "ImplBlock",
       "name": "std::fmt::Display for FulltextHitKind",
       "last_known_file": "crates/smartfs-db/src/models.rs",
-      "last_known_line": 107,
+      "last_known_line": 112,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1801,7 +1812,7 @@
       "kind": "ImplBlock",
       "name": "Default for FuseStateManager",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 115,
+      "last_known_line": 137,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1823,7 +1834,7 @@
       "kind": "ImplBlock",
       "name": "FuseStateManager",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 122,
+      "last_known_line": 144,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1834,7 +1845,7 @@
       "kind": "Struct",
       "name": "FuseStateManager",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 107,
+      "last_known_line": 129,
       "doc_summary": "Concurrent thread-safe state manager for the FUSE daemon.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1856,7 +1867,7 @@
       "kind": "Struct",
       "name": "InodeState",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 98,
+      "last_known_line": 120,
       "doc_summary": "State tracking open file descriptor count and delayed deletion for an inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1867,7 +1878,7 @@
       "kind": "Struct",
       "name": "OpenHandle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 78,
+      "last_known_line": 100,
       "doc_summary": "Open file handle descriptor tracking buffered content and AST analysis state.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1966,7 +1977,7 @@
       "kind": "Function",
       "name": "allocate_fh",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 136,
+      "last_known_line": 158,
       "doc_summary": "Allocate a new unique file handle, incrementing `open_fd_count` for the inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1977,7 +1988,7 @@
       "kind": "Function",
       "name": "cache_ino_mapping",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 371,
+      "last_known_line": 393,
       "doc_summary": "Caches the mapping between FUSE `ino` and database UUID.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1988,7 +1999,7 @@
       "kind": "Function",
       "name": "close_handle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 313,
+      "last_known_line": 335,
       "doc_summary": "Close a file handle, decrementing `open_fd_count`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2021,7 +2032,7 @@
       "kind": "Function",
       "name": "ensure_buffer",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 183,
+      "last_known_line": 205,
       "doc_summary": "Ensure the buffer is loaded for `fh`, invoking `loader` if currently uninitialized.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2060,6 +2071,17 @@
       "tombstoned_reason": null
     },
     {
+      "id": "5ca7f0d3-91b8-4e26-bd47-30f9a6c81e52",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "file_type_of",
+      "last_known_file": "crates/smartfs-fuse/src/state.rs",
+      "last_known_line": 69,
+      "doc_summary": "Derives the POSIX file type of an inode (ADR-59).",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "46a78738-d96c-4c16-a62a-5e2f8fc6b8f1",
       "crate_name": "smartfs-fuse",
       "kind": "Function",
@@ -2076,7 +2098,7 @@
       "kind": "Function",
       "name": "get_cached_id",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 378,
+      "last_known_line": 400,
       "doc_summary": "Looks up a cached database UUID for the given FUSE `ino`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2087,7 +2109,7 @@
       "kind": "Function",
       "name": "get_handle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 176,
+      "last_known_line": 198,
       "doc_summary": "Retrieves a cloned snapshot of the `OpenHandle` for the given file handle.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2098,7 +2120,7 @@
       "kind": "Function",
       "name": "get_inode_buffer_len",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 264,
+      "last_known_line": 286,
       "doc_summary": "Returns the length of the in-memory buffer for an open handle of the given inode, if any.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2120,7 +2142,7 @@
       "kind": "Function",
       "name": "is_marked_for_deletion",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 354,
+      "last_known_line": 376,
       "doc_summary": "Checks whether an inode is marked for deletion.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2142,7 +2164,7 @@
       "kind": "Function",
       "name": "mark_for_deletion",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 340,
+      "last_known_line": 362,
       "doc_summary": "Mark an inode for deletion upon unlink or rmdir.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2164,7 +2186,7 @@
       "kind": "Function",
       "name": "new",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 125,
+      "last_known_line": 147,
       "doc_summary": "Creates a new, empty `FuseStateManager`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2197,7 +2219,7 @@
       "kind": "Function",
       "name": "open_fd_count",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 364,
+      "last_known_line": 386,
       "doc_summary": "Returns the number of open file descriptors for the given inode.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2318,7 +2340,7 @@
       "kind": "Function",
       "name": "store_ast_nodes",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 302,
+      "last_known_line": 324,
       "doc_summary": "Store AST nodes in per-fd state (extracted during `flush()`).",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2340,7 +2362,7 @@
       "kind": "Function",
       "name": "system_time_from_datetime",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 65,
+      "last_known_line": 87,
       "doc_summary": "Convert a `chrono::DateTime<Utc>` into a standard `SystemTime`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2351,7 +2373,7 @@
       "kind": "Function",
       "name": "truncate_handle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 222,
+      "last_known_line": 244,
       "doc_summary": "Truncate or resize the per-fd memory buffer to `new_size` without creating a version.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2362,7 +2384,7 @@
       "kind": "Function",
       "name": "truncate_handle_committed",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 290,
+      "last_known_line": 312,
       "doc_summary": "Updates a specific open handle with newly committed truncated data, setting modified=false.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2373,7 +2395,7 @@
       "kind": "Function",
       "name": "truncate_inode_handles",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 239,
+      "last_known_line": 261,
       "doc_summary": "Truncate or resize the per-fd memory buffer for all open handles of an inode without committing.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2384,7 +2406,7 @@
       "kind": "Function",
       "name": "truncate_inode_handles_committed",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 278,
+      "last_known_line": 300,
       "doc_summary": "Updates all open handles for an inode with newly committed truncated data, setting modified=false.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2395,7 +2417,7 @@
       "kind": "Function",
       "name": "truncate_inode_handles_with_data",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 252,
+      "last_known_line": 274,
       "doc_summary": "Sets the per-fd memory buffer for all open handles of an inode to `data`, marking modified=true.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2450,7 +2472,7 @@
       "kind": "Function",
       "name": "write_to_handle",
       "last_known_file": "crates/smartfs-fuse/src/state.rs",
-      "last_known_line": 201,
+      "last_known_line": 223,
       "doc_summary": "Writes raw bytes to the per-fd memory buffer at `offset`, expanding it if necessary.",
       "tombstoned": false,
       "tombstoned_reason": null

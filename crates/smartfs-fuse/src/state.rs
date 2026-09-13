@@ -22,13 +22,7 @@ use uuid::Uuid;
 pub fn inode_to_file_attr(record: &InodeRecord) -> FileAttr {
     let size = record.size.max(0) as u64;
     let blocks = size.div_ceil(512);
-    let kind = if record.is_dir {
-        FileType::Directory
-    } else if (record.mode as u32 & libc::S_IFMT) == libc::S_IFLNK {
-        FileType::Symlink
-    } else {
-        FileType::RegularFile
-    };
+    let kind = file_type_of(record);
     let perm = (record.mode as u16) & 0o7777;
     let nlink = if record.is_dir {
         2
@@ -54,9 +48,37 @@ pub fn inode_to_file_attr(record: &InodeRecord) -> FileAttr {
         nlink,
         uid: record.uid as u32,
         gid: record.gid as u32,
-        rdev: 0,
+        // Meaningful only for S_IFCHR/S_IFBLK; 0 everywhere else (ADR-59).
+        rdev: record.rdev as u32,
         blksize: 4096,
         flags: 0,
+    }
+}
+
+/// @id: 5ca7f0d3-91b8-4e26-bd47-30f9a6c81e52
+/// Derives the POSIX file type of an inode (ADR-59).
+///
+/// The type lives in `mode`'s `S_IFMT` bits, which is where POSIX puts it and
+/// where `mknod(2)` expects it. There is deliberately no separate column: two
+/// places recording the same fact are two places that can disagree.
+///
+/// Rows written before migration 007 have their type bits masked off, because
+/// the old `inode_create` stored `mode & 0o7777`. A zero `S_IFMT` therefore
+/// falls back to `is_dir`; without that, every pre-existing file would become a
+/// file of unknown type the moment this shipped.
+pub fn file_type_of(record: &InodeRecord) -> FileType {
+    match (record.mode as u32) & libc::S_IFMT {
+        libc::S_IFDIR => FileType::Directory,
+        libc::S_IFREG => FileType::RegularFile,
+        libc::S_IFLNK => FileType::Symlink,
+        libc::S_IFIFO => FileType::NamedPipe,
+        libc::S_IFSOCK => FileType::Socket,
+        libc::S_IFCHR => FileType::CharDevice,
+        libc::S_IFBLK => FileType::BlockDevice,
+        // Legacy row with the type bits masked away, or a value we do not know:
+        // is_dir is the only other record of the truth we have.
+        _ if record.is_dir => FileType::Directory,
+        _ => FileType::RegularFile,
     }
 }
 
@@ -407,6 +429,7 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            rdev: 0,
         };
 
         let attr = inode_to_file_attr(&record);
@@ -441,6 +464,7 @@ mod tests {
             on_prem: true,
             compression_level: 3,
             versioning_enabled: true,
+            rdev: 0,
         };
 
         let attr = inode_to_file_attr(&record);
@@ -537,5 +561,94 @@ mod tests {
             immediate_delete,
             "Must delete immediately when open_fd_count == 0"
         );
+    }
+}
+
+#[cfg(test)]
+mod file_type_tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn rec(mode: u32, is_dir: bool, rdev: i64) -> InodeRecord {
+        let now = Utc::now();
+        InodeRecord {
+            id: Uuid::new_v4(),
+            ino: 2,
+            parent_id: None,
+            name: "n".to_string(),
+            is_dir,
+            uid: 0,
+            gid: 0,
+            mode: mode as i32,
+            size: 0,
+            nlink: 1,
+            created_at: now,
+            updated_at: now,
+            current_blob_id: None,
+            backend_id: None,
+            on_prem: true,
+            compression_level: 3,
+            versioning_enabled: true,
+            rdev,
+        }
+    }
+
+    #[test]
+    fn every_posix_type_round_trips_through_the_mode_bits() {
+        for (bits, want) in [
+            (libc::S_IFREG, FileType::RegularFile),
+            (libc::S_IFDIR, FileType::Directory),
+            (libc::S_IFLNK, FileType::Symlink),
+            (libc::S_IFIFO, FileType::NamedPipe),
+            (libc::S_IFSOCK, FileType::Socket),
+            (libc::S_IFCHR, FileType::CharDevice),
+            (libc::S_IFBLK, FileType::BlockDevice),
+        ] {
+            assert_eq!(file_type_of(&rec(bits | 0o644, false, 0)), want, "for {bits:o}");
+        }
+    }
+
+    #[test]
+    fn permission_bits_never_influence_the_type() {
+        for perm in [0o000, 0o644, 0o777, 0o1777, 0o4755] {
+            assert_eq!(
+                file_type_of(&rec(libc::S_IFIFO | perm, false, 0)),
+                FileType::NamedPipe,
+                "sticky/setuid bits must not be mistaken for type bits ({perm:o})"
+            );
+        }
+    }
+
+    #[test]
+    fn rows_predating_migration_007_fall_back_to_is_dir() {
+        // The old inode_create stored `mode & 0o7777`, so these rows carry no
+        // S_IFMT at all. Without the fallback every existing file would become
+        // a file of unknown type.
+        assert_eq!(file_type_of(&rec(0o755, true, 0)), FileType::Directory);
+        assert_eq!(file_type_of(&rec(0o644, false, 0)), FileType::RegularFile);
+    }
+
+    #[test]
+    fn mode_bits_win_over_is_dir_when_both_are_present() {
+        // is_dir is a denormalisation; mode is where POSIX keeps the truth.
+        assert_eq!(
+            file_type_of(&rec(libc::S_IFREG | 0o644, true, 0)),
+            FileType::RegularFile
+        );
+    }
+
+    #[test]
+    fn device_number_reaches_the_attributes() {
+        let attr = inode_to_file_attr(&rec(libc::S_IFCHR | 0o666, false, 259));
+        assert_eq!(attr.kind, FileType::CharDevice);
+        assert_eq!(attr.rdev, 259);
+        assert_eq!(attr.perm, 0o666);
+    }
+
+    #[test]
+    fn non_device_types_report_no_device_number() {
+        let attr = inode_to_file_attr(&rec(libc::S_IFIFO | 0o644, false, 0));
+        assert_eq!(attr.rdev, 0);
     }
 }

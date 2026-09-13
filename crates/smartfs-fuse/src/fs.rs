@@ -386,7 +386,10 @@ impl Filesystem for SmartFsFuse {
                 record.id,
                 uid.map(|u| u as i32),
                 gid.map(|g| g as i32),
-                mode.map(|m| (m & 0o7777) as i32),
+                // Keep S_IFMT: chmod changes permissions, never the type. Masking
+                // the request outright used to store a mode with no type bits,
+                // which after ADR-59 would turn the file into "type unknown".
+                mode.map(|m| (((record.mode as u32) & libc::S_IFMT) | (m & 0o7777)) as i32),
                 None, // size is managed exclusively by cow_commit / drain pipeline
             )
             .await?;
@@ -464,13 +467,9 @@ impl Filesystem for SmartFsFuse {
                 entries.push((2i64, parent_ino, FileType::Directory, "..".to_string()));
 
                 for (idx, child) in children.into_iter().enumerate() {
-                    let kind = if child.is_dir {
-                        FileType::Directory
-                    } else if (child.mode as u32 & libc::S_IFMT) == libc::S_IFLNK {
-                        FileType::Symlink
-                    } else {
-                        FileType::RegularFile
-                    };
+                    // One derivation for every path (ADR-59), so readdir cannot
+                    // disagree with getattr about what a file is.
+                    let kind = crate::state::file_type_of(&child);
                     entries.push(((idx + 3) as i64, child.ino as u64, kind, child.name));
                 }
 
@@ -542,7 +541,9 @@ impl Filesystem for SmartFsFuse {
                 false,
                 uid,
                 gid,
-                (mode & 0o7777) as i32,
+                // ADR-59: store the full mode. create(2) is only ever called for
+                // regular files, so the type is S_IFREG by definition.
+                (libc::S_IFREG | (mode & 0o7777)) as i32,
             )
             .await?;
 
@@ -1163,7 +1164,9 @@ impl Filesystem for SmartFsFuse {
                 true,
                 uid,
                 gid,
-                (mode & 0o7777) as i32,
+                // ADR-59: store the full mode, matching the root inode which
+                // migration 001 already seeds as 0o40755.
+                (libc::S_IFDIR | (mode & 0o7777)) as i32,
             )
             .await?;
 
@@ -1187,7 +1190,7 @@ impl Filesystem for SmartFsFuse {
         name: &OsStr,
         mode: u32,
         _umask: u32,
-        _rdev: u32,
+        rdev: u32,
         reply: ReplyEntry,
     ) {
         let name_str = match name.to_str() {
@@ -1203,12 +1206,33 @@ impl Filesystem for SmartFsFuse {
             return;
         }
 
-        let file_type = mode & libc::S_IFMT;
-        if file_type != libc::S_IFREG && file_type != 0 {
-            // SmartFS MVP does not support fifos, sockets, character or block devices
-            reply.error(libc::ENOTSUP);
-            return;
-        }
+        // ADR-59: every POSIX type is representable. FIFOs, sockets and device
+        // nodes have no data path at all — the kernel implements their
+        // semantics once getattr reports the type — so they cost one inode row
+        // and nothing else. mknod(2) leaves the type unspecified as 0, which
+        // POSIX treats as a regular file.
+        let file_type = match mode & libc::S_IFMT {
+            0 => libc::S_IFREG,
+            t @ (libc::S_IFREG
+            | libc::S_IFIFO
+            | libc::S_IFSOCK
+            | libc::S_IFCHR
+            | libc::S_IFBLK) => t,
+            // S_IFDIR belongs to mkdir and S_IFLNK to symlink; mknod(2) says
+            // EINVAL for a type it does not create, not ENOTSUP.
+            _ => {
+                reply.error(libc::EINVAL);
+                return;
+            }
+        };
+
+        // rdev is meaningful only for device nodes; mknod(2) ignores it otherwise.
+        let node_rdev = if file_type == libc::S_IFCHR || file_type == libc::S_IFBLK {
+            rdev as i64
+        } else {
+            0
+        };
+        let stored_mode = (file_type | (mode & 0o7777)) as i32;
 
         let pool = self.pool.clone();
         let state = self.state.clone();
@@ -1222,14 +1246,15 @@ impl Filesystem for SmartFsFuse {
                     SmartFsError::NotFound(format!("Parent inode {parent} not found"))
                 })?;
 
-            let file = smartfs_db::inode_create(
+            let file = smartfs_db::inode_create_with_rdev(
                 &pool,
                 Some(parent_record.id),
                 &name_str,
                 false,
                 uid,
                 gid,
-                (mode & 0o7777) as i32,
+                stored_mode,
+                node_rdev,
             )
             .await?;
 

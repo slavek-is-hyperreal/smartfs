@@ -14,7 +14,7 @@ pub async fn inode_lookup(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled
+               compression_level, versioning_enabled, rdev
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1 AND name = $2
         "#,
@@ -33,7 +33,7 @@ pub async fn inode_lookup_by_ino(pool: &PgPool, ino: i64) -> Result<Option<Inode
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled
+               compression_level, versioning_enabled, rdev
         FROM inode_registry
         WHERE ino = $1
         "#,
@@ -51,7 +51,7 @@ pub async fn inode_get(pool: &PgPool, id: Uuid) -> Result<Option<InodeRecord>> {
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled
+               compression_level, versioning_enabled, rdev
         FROM inode_registry
         WHERE id = $1
         "#,
@@ -73,13 +73,39 @@ pub async fn inode_create(
     gid: i32,
     mode: i32,
 ) -> Result<InodeRecord> {
+    inode_create_with_rdev(pool, parent_id, name, is_dir, uid, gid, mode, 0).await
+}
+
+/// @id: 3b9f47c1-6e20-4d85-a0f3-58d1cb2e7940
+/// Creates an inode of any POSIX type, carrying a device number (ADR-59).
+///
+/// `rdev` is meaningful only for `S_IFCHR` and `S_IFBLK`; `mknod(2)` ignores it
+/// for every other type and so does this. `mode` is expected to carry its
+/// `S_IFMT` bits — the type of a file lives there, not in a column of its own,
+/// and masking them off is what previously made every non-regular file
+/// impossible to represent.
+///
+/// FIFOs, sockets and device nodes have no data path: the kernel implements
+/// their semantics once `getattr` tells it the type, so they are stored as an
+/// inode row and nothing else — no blob, no version, `size = 0`.
+#[allow(clippy::too_many_arguments)]
+pub async fn inode_create_with_rdev(
+    pool: &PgPool,
+    parent_id: Option<Uuid>,
+    name: &str,
+    is_dir: bool,
+    uid: i32,
+    gid: i32,
+    mode: i32,
+    rdev: i64,
+) -> Result<InodeRecord> {
     sqlx::query_as::<_, InodeRecord>(
         r#"
-        INSERT INTO inode_registry (parent_id, name, is_dir, uid, gid, mode)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO inode_registry (parent_id, name, is_dir, uid, gid, mode, rdev)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled
+                  compression_level, versioning_enabled, rdev
         "#,
     )
     .bind(parent_id)
@@ -88,6 +114,7 @@ pub async fn inode_create(
     .bind(uid)
     .bind(gid)
     .bind(mode)
+    .bind(rdev)
     .fetch_one(pool)
     .await
     .map_err(|e| SmartFsError::Db(format!("inode_create error: {e}")))
@@ -114,7 +141,7 @@ pub async fn inode_list_children(
         r#"
         SELECT id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                created_at, updated_at, current_blob_id, backend_id, on_prem,
-               compression_level, versioning_enabled
+               compression_level, versioning_enabled, rdev
         FROM inode_registry
         WHERE parent_id IS NOT DISTINCT FROM $1
         ORDER BY ino ASC
@@ -147,7 +174,7 @@ pub async fn inode_update_attrs(
         WHERE id = $1
         RETURNING id, ino, parent_id, name, is_dir, uid, gid, mode, size, nlink,
                   created_at, updated_at, current_blob_id, backend_id, on_prem,
-                  compression_level, versioning_enabled
+                  compression_level, versioning_enabled, rdev
         "#,
     )
     .bind(id)

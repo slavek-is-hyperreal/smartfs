@@ -23,6 +23,11 @@ pub struct InodeRecord {
     pub on_prem: bool,
     pub compression_level: i16,
     pub versioning_enabled: bool,
+    /// Device number for `S_IFCHR`/`S_IFBLK`, 0 for every other type (ADR-59).
+    ///
+    /// `i64` because Linux `dev_t` is 64-bit: `makedev()` with a large minor
+    /// number does not fit in 32 bits.
+    pub rdev: i64,
 }
 
 /// @id: 54cfcbe4-8461-460d-85fa-7f897368d1ab
