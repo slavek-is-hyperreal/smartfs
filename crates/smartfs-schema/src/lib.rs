@@ -4,9 +4,11 @@
 //! Invariant: Zero business logic, zero I/O, zero SQL.
 
 pub mod error;
+pub mod pending;
 pub mod types;
 
 pub use error::{Result, SmartFsError};
+pub use pending::PendingMarker;
 pub use types::{
     BlobId, ContentHash, FileMode, Gid, ProcessingStatus, Uid, Uuid, VersionNumber,
 };

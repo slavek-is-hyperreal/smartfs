@@ -1,6 +1,6 @@
 [package]
 name = "smartfs-schema"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -10,3 +10,4 @@ description = "Shared types for SmartFS — zero logic, zero I/O, zero SQL"
 thiserror.workspace = true
 uuid.workspace = true
 serde.workspace = true
+serde_json.workspace = true

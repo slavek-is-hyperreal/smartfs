@@ -1,6 +1,6 @@
 {
   "_comment": "Written by scripts/version_bump.py. Hash covers each crate's src/tests/benches/examples/build.rs plus its Cargo.toml with the version line removed.",
-  "updated_at": "2026-09-13T00:05:52+00:00",
+  "updated_at": "2026-09-13T00:20:25+00:00",
   "crates": {
     "smartfs-ai": {
       "version": "0.1.0",
@@ -48,8 +48,8 @@
       "path": "crates/smartfs-mcp"
     },
     "smartfs-schema": {
-      "version": "0.1.0",
-      "hash": "74d4cc033704b1c144565851b32f2105f48c3040fecd56d7b45b8c011544caa6",
+      "version": "0.1.1",
+      "hash": "2f54a1f83b4f636496c1c5d54aaab02dc8632568f9c4e9cf566586cf5c8f783f",
       "path": "crates/smartfs-schema"
     },
     "smartfs-semantic": {
@@ -58,8 +58,8 @@
       "path": "crates/smartfs-semantic"
     },
     "smartfs-store": {
-      "version": "0.1.0",
-      "hash": "aa8ec4072ca7c3e4d63807fa0c4fcf26638a696cfa36a29b251b41e1bb09ede4",
+      "version": "0.1.1",
+      "hash": "89a1f57b3af5c9f76c95fe0695247d1853ea931448bb6c7cc72c73272d90a421",
       "path": "crates/smartfs-store"
     }
   }

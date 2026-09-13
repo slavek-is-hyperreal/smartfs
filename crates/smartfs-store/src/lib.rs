@@ -3,9 +3,11 @@
 //! Receives already-compressed bytes. Zero database, hashing, or FUSE awareness.
 
 pub mod local;
+pub mod pending;
 pub mod traits;
 
 pub use local::LocalDiskStore;
+pub use pending::PendingQueue;
 pub use traits::BlobStore;
 
 #[cfg(test)]
