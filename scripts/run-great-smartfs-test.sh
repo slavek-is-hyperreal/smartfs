@@ -281,6 +281,22 @@ do_run() {
     return $rc
   }
 
+  # Stage 4's K12 kills the Postgres container and restarts it. Postgres then
+  # spends a while in crash recovery refusing connections, and the next stage
+  # hits "the database system is not yet accepting connections" and fails for a
+  # reason unrelated to the code under test. Waiting between stages keeps that
+  # ordering artifact out of the results.
+  wait_for_postgres() {
+    local waited=0
+    while (( waited < 120 )); do
+      psql "$SMARTFS_DB_URL" -qtAX -c 'SELECT 1' >/dev/null 2>&1 && return 0
+      (( waited == 0 )) && info "waiting for Postgres to finish recovering…"
+      sleep 2; waited=$(( waited + 2 ))
+    done
+    bad "Postgres did not accept connections within 120s"
+    return 1
+  }
+
   run_stage 0 00_preflight_checks.sh "preflight"
   if [[ " $STAGES " == *" 0 "* && "${EXIT_CODE[0]}" -ne 0 ]]; then
     say "STOPPED"
@@ -297,6 +313,7 @@ do_run() {
   run_stage 2 02_run_pjdfstest.sh               "pjdfstest (POSIX semantics)"
   run_stage 3 03_setup_check_smartfs_xfstests.sh "xfstests scaffold"
   run_stage 4 04_crash_consistency_test.sh      "crash consistency"
+  wait_for_postgres || true
   run_stage 5 05_perf_diagnostics.sh            "perf diagnostics (record-only)"
 
   # ── optional: the multi-hour generic/ run ──────────────────────────────────
