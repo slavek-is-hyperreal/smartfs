@@ -117,6 +117,44 @@ Etap 5 przy pierwszym uruchomieniu znalazł błąd, którego nikt nie szukał: *
 **Ostrzeżenie metodologiczne, wpisane tu celowo:** pierwsze porównania między przebiegami były bezwartościowe, bo etap 5 biegł po pjdfstest i po 25 rundach crash-testu młócących ten sam dysk. Izolacja (`echo "0 5" > _control/run`) odzyskała większość metryk. **Zanim jakakolwiek różnica zostanie czemukolwiek przypisana, trzeba znać rozrzut przebieg-do-przebiegu przy tym samym commicie.** Porównywanie pojedynczych pomiarów bez tego to zgadywanie z liczbami dla ozdoby.
 
 
+## 5c. Gdzie naprawdę idzie czas zapisu — zmierzone
+
+Rozbicie `close()` na fazy (`590bbb2`), mediana z 200 zapisów:
+
+| faza | ms | udział |
+|---|---:|---:|
+| **dedup** (`insert_blob`) | **43,3** | **58%** |
+| blob (kompresja + `store.put` + fsync) | 25,8 | 35% |
+| marker (znacznik ADR-58 + fsync) | 2,0 | 3% |
+| lookup inode'a | 0,7 | 1% |
+| hash | 0,04 | 0% |
+| razem | 74,5 | |
+
+Faza `dedup` to **jeden `INSERT` do `blobs` w autocommicie**. Zmierzony poza SmartFS, gołym `psql` na kopii bazy:
+
+```
+50 INSERT-ów, każdy w autocommicie   →  27 ms/szt.
+50 INSERT-ów w jednej transakcji     →   1 ms/szt.
+50 przy synchronous_commit=off       →   1 ms/szt.
+```
+
+Dwadzieścia siedem milisekund to **wyłącznie oczekiwanie na fsync WAL-a**. Dane Postgresa leżą na `vectorlegis_ssd_pool/docker` — ZFS z `sync=standard` i `logbias=latency`, bez wydzielonego SLOG-a — więc każdy commit to synchroniczny zapis do ZIL-a na dyskach poola.
+
+**Wniosek: gorąca ścieżka zapisu SmartFS jest zdominowana przez opóźnienie commitu Postgresa na ZFS, nie przez kod SmartFS.**
+
+### Co to znaczy dla ADR-58
+
+ADR-58 zdjął ze ścieżki potwierdzenia transakcję Postgresową i wstawił w to miejsce fsync znacznika na ext4. Pomiar wycenia tę zamianę: **znacznik kosztuje 2,0 ms, commit Postgresa kosztuje 27–43 ms.** ADR-58 zwrócił się z nawiązką i to jest pierwsza twarda odpowiedź na pytanie, które sam zostawił otwarte.
+
+Ale zwrócił się **tylko w połowie**: przeniósł KROK 2, a `insert_blob` z KROKU 1 nadal jest synchroniczny — i to on jest teraz 58% kosztu. Ta sama logika, która uzasadniła ADR-58, uzasadnia zdjęcie z tej ścieżki również dedupu.
+
+**To nie jest jednak zwykła optymalizacja i nie wolno jej zrobić poprawką.** `insert_blob` jest punktem serializacji dedupu *przed* `store.put` — na tym stoją FIX-03 (sprawdzenie fizycznego istnienia bloba) i FIX-04 (kompensacja przy nieudanym `store.put`, „zatruty wiersz"). Przesunięcie go zmienia semantykę crashową, czyli dokładnie to, co mierzy etap 4 punktami K1–K5. Wymaga ADR-a i decyzji właściciela, nie commita.
+
+### Opcje infrastrukturalne, poza kodem
+
+Niezależnie od powyższego, 27 ms na commit to cecha ustawienia, nie prawo natury. Do rozważenia przez właściciela: wydzielony SLOG dla poola, albo przeniesienie wolumenu Postgresa z ZFS na `sda3`/ext4. `synchronous_commit=off` **odpada** — to handel trwałością, czyli tym, o co chodzi w całym zestawie invariantów.
+
+
 ## 6. Pętla „napraw → ponów" bez nadzoru
 
 Cel: agent iteruje samodzielnie, aż wszystkie porażki są zaklasyfikowane.
