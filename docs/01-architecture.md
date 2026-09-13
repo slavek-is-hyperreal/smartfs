@@ -64,6 +64,10 @@ Pełne ADR: [docs/adr/ADR-49-qwen-default-model.md](adr/ADR-49-qwen-default-mode
 
 Obie traktowane analogicznie do GPU (ADR-55/Faza 7) — bonus ciągłości/ergonomii dla agentów, nigdy warunek pierwszego działającego demona.
 
+**Przyjęty po Fazach 0-6, zmienia gorącą ścieżkę zapisu:**
+
+- [ADR-58](adr/ADR-58-two-stage-cow-commit.md) — `cow_commit` rozdzielony na dwa etapy: `release()` zapisuje blob plus atomowy znacznik `pending` na ext4 (wzorzec Maildira: zapis do `pending/tmp/`, `fdatasync`, `rename()` do `pending/queue/`) i wraca do wołającego, a pojedynczy konsument drenuje kolejkę do Postgresa w tle. Trwałość daje `rename()`, nie kolejka w RAM — ta jest wyłącznie optymalizacją kolejności i jest w całości odtwarzalna ze skanu `pending/queue/` przy starcie demona. Kolejka ma twardy limit liczony od całkowitego RAM-u maszyny; po jego trafieniu `write()` blokuje do 30 s, a potem zwraca `EAGAIN` — nigdy nie gubi potwierdzonego zapisu. Wymaga jednej nowej migracji: unikalny indeks na `(inode_id, version_number)` jako klucz idempotencji replayu. Wypisuje `smartfs-fuse` i `smartfs-store` z [_unchanged.md](crates/_unchanged.md).
+
 ## Invarianty — rozszerzenie ROOT CLAUDE.md
 
 Pięć invariantów z v4.5 (ROOT CLAUDE.md §3.1, pełny tekst także w
