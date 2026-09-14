@@ -30,11 +30,13 @@ DEST="${MODEL_ROOT}/qwen3-embedding-0.6b"
 # does not match is not "a newer upload" to shrug at — it is a different model
 # producing a different vector space than the one embedding_models describes.
 #
-# Both variants are fetched because they serve different execution paths
-# (ADR-63 rev 2, sections 1e and 3), not because one is a spare:
-#   f16  1137 MiB - CPU path, and GPUs with VRAM to spare
-#   Q8_0  604 MiB - GPU path; this is the variant that fits a 1 GB card whole,
-#                   with all 28 layers offloaded and ~340 MiB left over
+# Both variants are fetched because which one is the default is an open
+# measurement, not a settled choice (ADR-63 rev 3, section 1g):
+#   f16  1137 MiB - no dequantisation, and F16C converts in hardware here
+#   Q8_0  604 MiB - half the bytes per layer, but its kernels lean on integer
+#                   AVX2, which this CPU (ivybridge variant) does not have
+# Whichever wins on speed still has to clear the cosine/top-k agreement
+# threshold in section 3 before it can become the default.
 declare -A EXPECTED=(
   [Qwen3-Embedding-0.6B-f16.gguf]=421a27e58d165478cc7acb984a688c2aa41404968b0203e7cd743ece44c54340
   [Qwen3-Embedding-0.6B-Q8_0.gguf]=06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439

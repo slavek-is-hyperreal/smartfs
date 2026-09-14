@@ -75,13 +75,15 @@ Dlaczego osobny proces, a nie wątek: worker ładuje ~1,2 GB wag przez natywny k
 
 Struktura nazywa się teraz `HashEmbeddingEngine` i jest opisana jako to, czym jest — deterministyczna atrapa do testów przepływu wierszy, **bez znaczenia semantycznego**, niewybieralna żadną flagą ani konfiguracją.
 
-Prawdziwa inferencja idzie przez `llama-cpp-2` (FFI do `ggml`) na pliku GGUF. Jeden silnik, ale **wiele backendów** — CPU z wyborem zestawu instrukcji w czasie startu i Vulkan — a o tym, który liczy, rozstrzyga pomiar zapisany w `<model-path>/backend-calibration.json`, nie reguła (ADR-63 §1c). Brak pomiaru znaczy CPU.
+Prawdziwa inferencja idzie przez `llama-cpp-2` (FFI do `ggml`) na pliku GGUF. **Zakres v6.0 to wyłącznie backend CPU** — Vulkan jest odłożony, nie odwołany (ADR-63 §1.0).
 
-Worker zyskuje `--calibrate`, który ten pomiar wykonuje. **Nigdy nie odpala się sam przy montowaniu** — demon systemu plików nie staje na benchmark.
+Backend CPU nie jest przy tym jeden: `GGML_CPU_ALL_VARIANTS=ON` buduje wariant per zestaw instrukcji (`x64`, `sse42`, `sandybridge`, `ivybridge`, `haswell`, `skylakex`, … po `sapphirerapids` z AMX), a `ggml` wybiera przy starcie ten, który CPU unosi. Maszyna testowa trafia w `ivybridge` (SSE4.2, AVX, F16C — **bez AVX2 i FMA**). Warianty od `haswell` wzwyż są wysyłane, ale **nigdy u nas nie uruchomione**; ponieważ każdy jest osobną biblioteką ładowaną po CPUID, zepsuty wariant AVX-512 nie może zaszkodzić maszynie, która go nie wczyta — ale nie wolno też twierdzić, że działa.
 
-Konsekwencja dla buildu: workspace zaczyna wymagać CMake i kompilatora C++, a flagi `ggml` mają znaczenie wydajnościowe (`GGML_NATIVE=OFF`, `GGML_CPU_ALL_VARIANTS=ON`, `GGML_BACKEND_DL=ON`, `GGML_VULKAN=ON`, `GGML_CUDA/HIP=OFF`) — patrz tabela w ADR-63 §1b.
+Stąd wymóg: **worker loguje przy starcie, który wariant wczytał.** Bez tego zgłoszenie „wolno działa” z cudzego sprzętu nie niesie informacji, która jedyna ma znaczenie.
 
-Wariant wag idzie za ścieżką wykonania: f16 na CPU, **Q8_0 na GPU**, bo to ten wariant mieści cały model w karcie z 1 GB VRAM (15,9 MiB na warstwę, 28 warstw, cache KV 112 KiB na token — ADR-63 §1e).
+Konsekwencje dla buildu: workspace zaczyna wymagać CMake i kompilatora C++, `GGML_BACKEND_DL=ON` wymusza `BUILD_SHARED_LIBS=ON`, a `smartfs-worker` **nie jest jedną binarką** — obok niej jadą biblioteki wariantów, a `GGML_BACKEND_DIR` musi wskazywać miejsce, gdzie leżą. Pełna tabela flag w ADR-63 §1g.
+
+Który plik wag jest domyślny — f16 czy Q8_0 — jest **otwartym pomiarem**, nie ustaleniem: Q8_0 to o połowę mniej bajtów na warstwę, ale jego kernele opierają się na całkowitoliczbowym AVX2, którego ten procesor nie ma. Oba pliki są pobrane.
 
 ### 3. Model na dysku i zakaz cichego fallbacku
 

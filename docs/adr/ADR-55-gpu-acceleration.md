@@ -75,3 +75,9 @@ Trzy rzeczy, które doprecyzowują ten ADR, a wyszły dopiero przy liczeniu bud�
 3. **`llvmpipe` wygląda w Vulkanie jak urządzenie i nie jest kartą.** Wykrywanie musi odrzucać `PHYSICAL_DEVICE_TYPE_CPU`, inaczej maszyna bez GPU zamelduje akcelerację i będzie liczyć wolniej niż backend CPU. Na maszynie testowej `vulkaninfo` wylicza je jako GPU1 obok prawdziwej karty — to nie jest przypadek hipotetyczny.
 
 Konsekwencja dla zapisanej tu zasady „GPU jest bonusem, nigdy wymogiem": zostaje bez zmian, ale zyskuje mechanizm. O tym, czy bonus się opłaca, rozstrzyga pomiar per maszyna (`smartfs-worker --calibrate`, ADR-63 §1c), nie reguła — dokładnie dlatego, że zebrane wyżej liczby pokazują sprzęt, na którym GPU jest wolniejsze niż CPU.
+
+### Zakres v6.0 (ADR-63 rewizja 3): ścieżka GPU **odłożona**
+
+Na prośbę właściciela projektu v6.0 dostaje wyłącznie backend CPU; budowanie z Vulkanem, budżet VRAM i kalibracja wybierająca backend wypadają z zakresu. Nic z tego ADR nie zostaje unieważnione — `GGML_VULKAN` po prostu stoi na `OFF`, a analiza z ADR-63 §1a–§1e-bis (progi offloadu, pomiary tej karty, rozstrzygnięcie pytania o własne kernele) czeka policzona na moment, w którym GPU wróci.
+
+Zostaje w mocy niezależnie od zakresu: `GGML_CUDA` i `GGML_HIP` są wyłączone **trwale**, nie tymczasowo. To jest zasada tego ADR, nie etap wdrożenia.
