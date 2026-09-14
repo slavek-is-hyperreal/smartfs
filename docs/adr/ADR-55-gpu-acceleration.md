@@ -68,7 +68,9 @@ Trzy rzeczy, które doprecyzowują ten ADR, a wyszły dopiero przy liczeniu bud�
 
 1. **„Backend Vulkan" w `ggml` to zestaw kerneli compute w SPIR-V** — shadery GLSL kompilowane do SPIR-V i uruchamiane przez `vkCmdDispatch`, bez potoku graficznego. Warto to nazwać wprost, bo pytanie „a może napisać kernele Vulkan?" ma odpowiedź „one już są", a nie „to inna droga". Zbieżnie z [ADR-60](ADR-60-plugin-architecture-rust-spirv.md), który dopuszcza w projekcie dokładnie Rust i SPIR-V.
 
-2. **Mały VRAM nie wyklucza akceleracji.** `-ngl N` offloaduje N warstw, reszta zostaje na CPU, a w embeddingach długość kontekstu wybieramy sami, więc cache KV jest pokrętłem, nie wyrokiem. Zmierzone z pliku: warstwa Q8_0 to 15,9 MiB, cache KV 112 KiB na token — **karta z 1 GB VRAM mieści cały ten model (28 z 28 warstw) z zapasem**. Pełna tabela progów w [ADR-63](ADR-63-embedding-model-placement.md) §1e.
+2. **Mały VRAM nie wyklucza akceleracji.** `-ngl N` offloaduje N warstw, reszta zostaje na CPU, a w embeddingach długość kontekstu wybieramy sami, więc cache KV jest pokrętłem, nie wyrokiem. Zmierzone z pliku: warstwa Q8_0 to 15,9 MiB, cache KV 112 KiB na token — **karta z 1 GB VRAM mieści cały ten model (28 z 28 warstw) z zapasem 338 MiB**. Pełna tabela progów w [ADR-63](ADR-63-embedding-model-placement.md) §1e.
+
+   Z zastrzeżeniem, które ta sama maszyna dobrze ilustruje (§1e-bis): jej karta *ma* 1 GB, ale pulpit trzyma 677 MiB, więc wolne jest 347 MiB i offload schodzi do 10 warstw z 28. Ten sam sprzęt bez sesji graficznej bierze wszystkie 28. Dlatego pomiar wiąże się ze sprzętem **i chwilą**, a sterownik podaje przy tym dwie różne liczby wolnej pamięci — `sysfs` 347 MiB, budżet Vulkana ~195 MiB — obie poprawne, bo mierzą co innego.
 
 3. **`llvmpipe` wygląda w Vulkanie jak urządzenie i nie jest kartą.** Wykrywanie musi odrzucać `PHYSICAL_DEVICE_TYPE_CPU`, inaczej maszyna bez GPU zamelduje akcelerację i będzie liczyć wolniej niż backend CPU. Na maszynie testowej `vulkaninfo` wylicza je jako GPU1 obok prawdziwej karty — to nie jest przypadek hipotetyczny.
 

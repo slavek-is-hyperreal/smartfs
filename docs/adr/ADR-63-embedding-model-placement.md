@@ -135,7 +135,46 @@ warstwy_na_gpu = min(28, ⌊(vram_wolny − 112 KiB × ctx − 128 MiB zapasu) /
 
 **Odpowiedź na „idealnie żeby nawet 1 GB VRAM": przy Q8_0 karta z 1 GB mieści cały model z zapasem.** Nie jest to przypadek graniczny — jest z marginesem. Poniżej tego progu offload schodzi warstwami, aż do zera, i nic się po drodze nie psuje.
 
-Zastrzeżenie, którego nie wolno pominąć: liczy się VRAM **wolny**, nie całkowity, a na karcie obsługującej ekran jest on zmienny. Na tej maszynie `vulkaninfo` pokazuje 768 MiB sterty urządzenia, z czego wolne w chwili pomiaru było **35,8 MiB** — resztę trzyma pulpit. Ta karta (Bonaire, GCN 2 z 2013 r.) nie ma też `cooperative matrix` ani szybkiej arytmetyki fp16, więc `ggml` zejdzie na ścieżki zapasowe. Czy wyjdzie szybciej niż jej CPU — nie wiadomo, i właśnie dlatego rozstrzyga o tym §1c, a nie reguła.
+#### 1e-bis. Ta maszyna jest właśnie kartą 1 GB — i pokazuje, dlaczego liczy się VRAM *wolny*
+
+**Sprostowanie pierwszego pomiaru.** Pisałem wyżej w rewizji 2, że karta ma 768 MiB. To był odczyt jednej sterty wzięty za całą kartę. RADV dzieli 1 GB na dwie sterty device-local — 768 MiB niewidocznej dla CPU i 256 MiB w oknie BAR — a `sysfs` sterownika `amdgpu` podaje sumę wprost:
+
+```
+/sys/class/drm/card1/device/mem_info_vram_total   1024 MiB
+/sys/class/drm/card1/device/mem_info_vram_used     677 MiB   →  wolne 347 MiB
+```
+
+Czyli sprzęt w tej maszynie to **dokładnie ta półka, o którą chodziło w pytaniu**: 1 GB VRAM. I tu widać różnicę między „karta ma 1 GB" a „można użyć 1 GB", bo trzyma go pulpit (sesja X11, Cinnamon):
+
+| proces | VRAM |
+|---|---:|
+| `cinnamon` | 317 MiB |
+| `spotify` | 151 MiB |
+| `claude-desktop` | 122 MiB |
+| reszta | ~2 MiB |
+
+Dwa źródła podają dwie różne liczby wolnego i **obie są poprawne, bo mierzą co innego**:
+
+| źródło | wolne | co to znaczy |
+|---|---:|---|
+| `sysfs` `mem_info_vram_used` | 347 MiB | ile jądro faktycznie ma nierozdysponowane na całej karcie |
+| Vulkan `VK_EXT_memory_budget` | ~195 MiB | ile RADV obiecuje **nowemu** klientowi, z marginesem na resztę procesów |
+
+Wartość Vulkana jest przy tym ruchoma: w pierwszym pomiarze sterta niewidoczna miała 35,8 MiB budżetu, w drugim 90,0 MiB — bez żadnej zmiany z mojej strony. Kalibracja z §1c musi więc czytać budżet **w chwili startu workera** i przeżyć nieudaną alokację, a nie ufać liczbie zapisanej kiedyś w pliku.
+
+Co z tego wychodzi na tej karcie, przy Q8_0:
+
+| kiedy | wolne | ctx | warstw na GPU |
+|---|---:|---:|---|
+| pulpit działa, tak jak teraz | 347 MiB | 512 | 10 z 28 |
+| pulpit działa | 347 MiB | 1024 | 6 z 28 |
+| licząc budżetem Vulkana | 195 MiB | 512 | **0 z 28** |
+| zamknięty Spotify i `claude-desktop` | 623 MiB | 512 | 27 z 28 |
+| maszyna bez sesji graficznej | 1024 MiB | 1024 | **28 z 28**, 338 MiB zapasu |
+
+Ostatni wiersz jest tym, który się liczy dla wdrożenia: **serwer bez pulpitu z tą samą kartą offloaduje cały model.** Pierwsze wiersze są tym, co zobaczymy podczas testów na tej maszynie — i dlatego wynik kalibracji ma klucz wiążący go ze sprzętem i chwilą, a nie jest stałą w konfiguracji.
+
+Drugie zastrzeżenie, niezależne od ilości pamięci: Bonaire to GCN 2 z 2013 r., bez `cooperative matrix` i bez szybkiej arytmetyki fp16, więc `ggml` zejdzie na ścieżki zapasowe. Czy przy dziesięciu offloadowanych warstwach z dwudziestu ośmiu wyjdzie **szybciej niż sam CPU** — jest wątpliwe, bo przy częściowym offloadzie dochodzi transfer aktywacji przez PCIe w obie strony na granicy CPU/GPU. To jest dokładnie ten rodzaj pytania, na które nie odpowiada się regułą, tylko pomiarem z §1c.
 
 Drugi zastrzeżenie tej samej klasy: RADV wystawia stertę host-visible (tu 11,71 GiB), z której `ggml` potrafi alokować, gdy VRAM się skończy. Alokacja wtedy **się udaje**, a liczenie idzie przez PCIe i zwykle jest wolniejsze niż CPU. „Zmieściło się" nie znaczy „jest szybciej" — kolejny powód, żeby wynik ustalał pomiar.
 
