@@ -890,11 +890,11 @@ impl Filesystem for SmartFsFuse {
                                 Ok(c) => c,
                                 Err(e) => return Err(e),
                             };
+                        let t_compress = t_start.elapsed();
                         let compressed_size = Some(compressed.len() as i64);
                         let blob_id = new_blob_uuid;
                         store.put(blob_id, &compressed).await?;
-                        let t_dedup = t_start.elapsed();
-                        let t_blob = t_start.elapsed();
+                        let t_store = t_start.elapsed();
 
                         let marker = smartfs_schema::PendingMarker {
                             seq,
@@ -931,12 +931,16 @@ impl Filesystem for SmartFsFuse {
                         // it without parsing prose.
                         tracing::debug!(
                             target: "smartfs::write_phases",
-                            "phases_us lookup={} hash={} dedup={} blob={} marker={} total={}",
+                            // Names match what each span now measures. After
+                            // ADR-62 phase C there is no dedup on this path at
+                            // all, so a phase still called "dedup" would be a
+                            // metric whose name lies.
+                            "phases_us lookup={} hash={} compress={} store={} marker={} total={}",
                             t_lookup.as_micros(),
                             (t_hash - t_lookup).as_micros(),
-                            (t_dedup - t_hash).as_micros(),
-                            (t_blob - t_dedup).as_micros(),
-                            (t_total - t_blob).as_micros(),
+                            (t_compress - t_hash).as_micros(),
+                            (t_store - t_compress).as_micros(),
+                            (t_total - t_store).as_micros(),
                             t_total.as_micros()
                         );
 

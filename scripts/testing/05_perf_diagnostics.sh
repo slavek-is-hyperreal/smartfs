@@ -40,6 +40,12 @@ SAMPLES="${PERF_SAMPLES:-200}"
 # latency number says which step is slow only by accident; six say it directly.
 export RUST_LOG="${RUST_LOG:-info,smartfs::write_phases=debug}"
 
+# start_daemon APPENDS to this log, so without truncating, the phase medians
+# below are computed over every previous run's lines as well — mixing code from
+# different commits into one median. That silently contaminated the first phase
+# comparison; close() latency was unaffected because this script times it itself.
+rm -f "${RESULTS_ROOT}/${_STAGE_NAME}/smartfsd.log"
+
 trap stop_daemon EXIT
 start_daemon "$SMARTFS_MOUNT" "$SMARTFS_STORE_PATH" "$SMARTFS_DB_URL" --no-semantic
 require_live_mount "$SMARTFS_MOUNT"
@@ -144,6 +150,11 @@ DD_MB=64
 dd if=/dev/zero    of="${TMPDIR:-/tmp}/perf-zero.bin"   bs=1M count=$DD_MB status=none
 dd if=/dev/urandom of="${TMPDIR:-/tmp}/perf-random.bin" bs=1M count=$DD_MB status=none
 METRIC[write_compressible_mbps]="$(measure_throughput compressible "${TMPDIR:-/tmp}/perf-zero.bin" $DD_MB)"
+# Same bytes again. Under ADR-62 phase C the writer cannot know the content is
+# already stored, so it compresses and writes a full copy that the drain then
+# discards. That is the documented cost of deferring dedup, and it only shows up
+# if duplicate writes are measured separately from first writes.
+METRIC[write_duplicate_mbps]="$(measure_throughput duplicate "${TMPDIR:-/tmp}/perf-zero.bin" $DD_MB)"
 METRIC[write_incompressible_mbps]="$(measure_throughput incompressible "${TMPDIR:-/tmp}/perf-random.bin" $DD_MB)"
 pass "write throughput: compressible ${METRIC[write_compressible_mbps]} MB/s, incompressible ${METRIC[write_incompressible_mbps]} MB/s"
 
