@@ -64,7 +64,24 @@ Pytanie „może Vulkan compute kernels?" ma odpowiedź, która jest lepsza, ni�
 
 Warto odnotować zbieżność: [ADR-60](ADR-60-plugin-architecture-rust-spirv.md) dopuszcza w tym projekcie dokładnie dwa języki — Rust i SPIR-V. Silnik inferencji dostarczający swoje jądra jako SPIR-V nie jest wyjątkiem od tej zasady, tylko jej najlepszym przykładem.
 
-Pisanie własnych kerneli (CubeCL/`krnl`, odrzucone w ADR-55 rewizja 2) nadal nic tu nie daje, i to z konkretnego powodu: **problem małego VRAM-u nie jest problemem kerneli.** Rozwiązują go kwantyzacja i częściowy offload warstw — jedno i drugie `ggml` ma. Własny matmul nie zmniejszy modelu.
+Pisanie własnych kerneli (CubeCL/`krnl`, odrzucone w ADR-55 rewizja 2) nadal nic tu nie daje, i to z dwóch osobnych powodów.
+
+**Po pierwsze: problem małego VRAM-u nie jest problemem kerneli.** Rozwiązują go kwantyzacja i częściowy offload warstw — jedno i drugie `ggml` ma. Własny matmul nie zmniejszy modelu.
+
+**Po drugie, i to wymaga osobnej odpowiedzi, bo pytanie padło wprost:** czy techniki bit-shift/SWAR pozwoliłyby napisać szybki backend nawet dla starej karty tej klasy (Bonaire, GCN 2)? Technika jest realna i dokładnie tak robi się szybką inferencję kwantyzowaną na sprzęcie bez instrukcji iloczynu skalarnego. Ale na **tej** architekturze celuje w złą stronę, i da się to pokazać przepustowością instrukcji zamiast opinią:
+
+| operacja na GCN 2 | tempo |
+|---|---|
+| `v_fma_f32` (mnożenie + dodawanie fp32) | **pełne** — 1 MAC na instrukcję |
+| `v_mad_u32_u24` (mnożenie 24-bitowe) | pełne |
+| pełne mnożenie całkowite 32-bit | **ćwierć** |
+| `v_dot4_i32_i8` (iloczyn skalarny int8) | **nie istnieje** — wchodzi dopiero w gfx906/Vega 20 |
+
+Dot-produkt int8 w SWAR wymaga tu rozpakowania bajtów (`v_bfe`/przesunięcia), mnożenia, akumulacji i maskowania, żeby sąsiednie pola nie przeniosły się na siebie — realnie ≥3 instrukcje na ~2 MAC-i. `v_fma_f32` daje 1 MAC na 1 instrukcję. **SWAR przegrywa na GCN 2 właśnie dlatego, że nie ma tu `dot4`, który na nowszym sprzęcie robi z niego wygraną.** Ta karta jest szybka w fp32 (ok. 1,8 TFLOPS) i to jest jej mocna strona, nie słaba.
+
+Gdzie sztuczki bitowe naprawdę się na niej opłacają: **dekwantyzacja** — rozpakowanie bloków Q8_0 i nibbli Q4_K to czyste przesunięcia i maski. Shadery Vulkan w `ggml` już to tak robią. Technika jest więc w użyciu dokładnie tam, gdzie pomaga.
+
+Co z tego wynika proceduralnie: **najpierw pomiar stockowego backendu, potem ewentualnie kernel.** Nie mamy dziś ani jednej liczby z `ggml`/Vulkan na tej karcie, a pisanie własnego jądra, żeby pobić coś, czego nie zmierzyliśmy, to optymalizacja na ślepo. Gdyby pomiar pokazał, że stockowe shadery są na GCN 2 słabe, proporcjonalną odpowiedzią jest **łatka do konkretnego shadera** (backend Vulkan w `ggml` ma warianty per architektura i przyjmuje wkład), a nie własny backend. A gdyby motywacją było zrozumienie matematyki modeli od środka, to jest ścieżka już przewidziana i nazwana — ADR-55 §4 punkt (b) rezerwuje CubeCL/`krnl` dokładnie na ten scenariusz.
 
 #### 1b. Build: jedna binarka, która nie zakłada maszyny, na której powstała
 
@@ -162,19 +179,26 @@ Dwa źródła podają dwie różne liczby wolnego i **obie są poprawne, bo mier
 
 Wartość Vulkana jest przy tym ruchoma: w pierwszym pomiarze sterta niewidoczna miała 35,8 MiB budżetu, w drugim 90,0 MiB — bez żadnej zmiany z mojej strony. Kalibracja z §1c musi więc czytać budżet **w chwili startu workera** i przeżyć nieudaną alokację, a nie ufać liczbie zapisanej kiedyś w pliku.
 
-Co z tego wychodzi na tej karcie, przy Q8_0:
+Co z tego wychodzi na tej karcie, przy Q8_0. Drugi pomiar wykonano po zamknięciu Spotify i `claude-desktop` — zostało wolne 651 MiB, a jedynym konsumentem jest `cinnamon` (286 MiB):
 
 | kiedy | wolne | ctx | warstw na GPU |
 |---|---:|---:|---|
-| pulpit działa, tak jak teraz | 347 MiB | 512 | 10 z 28 |
-| pulpit działa | 347 MiB | 1024 | 6 z 28 |
-| licząc budżetem Vulkana | 195 MiB | 512 | **0 z 28** |
-| zamknięty Spotify i `claude-desktop` | 623 MiB | 512 | 27 z 28 |
+| pulpit + Spotify + `claude-desktop` | 347 MiB | 512 | 10 z 28 |
+| — jw., budżetem Vulkana | 195 MiB | 512 | **0 z 28** |
+| **sam pulpit (stan po zamknięciu apek)** | **651 MiB** | **512** | **28 z 28** — cały model |
+| sam pulpit | 651 MiB | 1024 | 25 z 28 |
+| — jw., budżetem Vulkana | 523 MiB | 512 | 21 z 28 |
 | maszyna bez sesji graficznej | 1024 MiB | 1024 | **28 z 28**, 338 MiB zapasu |
 
-Ostatni wiersz jest tym, który się liczy dla wdrożenia: **serwer bez pulpitu z tą samą kartą offloaduje cały model.** Pierwsze wiersze są tym, co zobaczymy podczas testów na tej maszynie — i dlatego wynik kalibracji ma klucz wiążący go ze sprzętem i chwilą, a nie jest stałą w konfiguracji.
+Wniosek praktyczny: **zamknięcie dwóch aplikacji przesunęło tę kartę z „10 warstw z 28" na „cały model na GPU"** przy ctx 512. Wielkość, która o tym decyduje, nie jest własnością sprzętu — jest stanem maszyny w danej chwili. Stąd klucz wpisu kalibracyjnego wiąże wynik ze sprzętem *i* chwilą, a worker czyta budżet przy starcie, zamiast ufać liczbie z pliku.
 
-Drugie zastrzeżenie, niezależne od ilości pamięci: Bonaire to GCN 2 z 2013 r., bez `cooperative matrix` i bez szybkiej arytmetyki fp16, więc `ggml` zejdzie na ścieżki zapasowe. Czy przy dziesięciu offloadowanych warstwach z dwudziestu ośmiu wyjdzie **szybciej niż sam CPU** — jest wątpliwe, bo przy częściowym offloadzie dochodzi transfer aktywacji przez PCIe w obie strony na granicy CPU/GPU. To jest dokładnie ten rodzaj pytania, na które nie odpowiada się regułą, tylko pomiarem z §1c.
+Zastrzeżenie o samej karcie: Bonaire to GCN 2 z 2013 r., bez `cooperative matrix` i bez szybkiej arytmetyki fp16, więc `ggml` zejdzie na ścieżki zapasowe.
+
+**Ale druga strona porównania jest słabsza, niż zakładałem, i to zmienia oczekiwanie.** CPU tej maszyny to Intel Core i5-3450 (Ivy Bridge, 2012): 4 rdzenie, 4 wątki, **`avx` jest, `avx2` i `fma` nie ma**. Kernele Q8_0 w `ggml` na CPU opierają się w dużej mierze na całkowitoliczbowym AVX2; bez niego zostaje ścieżka SSE/AVX1, a brak FMA znaczy dwie instrukcje tam, gdzie nowszy CPU ma jedną. Zestawienie szczytów: ok. 1,8 TFLOPS fp32 na karcie przeciw rzędowi ~0,1 TFLOPS na tym CPU.
+
+Napisałem wcześniej, że wątpię, by GPU wygrało z CPU na tej maszynie. **Przy pełnym offloadzie i takim CPU jest raczej odwrotnie** — i dokładnie dlatego rozstrzyga o tym pomiar z §1c, a nie moje przewidywanie w żadną ze stron.
+
+Trzecia konsekwencja tego samego odkrycia, poza zakresem §1: ADR-49 wybrał model 0,6B, bo zawór antygłodowy (ADR-42/FIX-05) zakłada inferencję rzędu dziesiątek–setek milisekund. Na CPU bez AVX2 i FMA to założenie jest zagrożone — co czyni akcelerację GPU na tej maszynie nie ozdobą, tylko potencjalnym warunkiem, żeby worker nadążał. Do sprawdzenia razem z czasem inferencji w §Konsekwencje.
 
 Drugi zastrzeżenie tej samej klasy: RADV wystawia stertę host-visible (tu 11,71 GiB), z której `ggml` potrafi alokować, gdy VRAM się skończy. Alokacja wtedy **się udaje**, a liczenie idzie przez PCIe i zwykle jest wolniejsze niż CPU. „Zmieściło się" nie znaczy „jest szybciej" — kolejny powód, żeby wynik ustalał pomiar.
 
