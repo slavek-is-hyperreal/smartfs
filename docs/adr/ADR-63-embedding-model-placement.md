@@ -2,7 +2,9 @@
 
 ← [Mapa ADR](../01-architecture.md) | Poprzednicy: [ADR-49](ADR-49-qwen-default-model.md) (wybór modelu), [ADR-55](ADR-55-gpu-acceleration.md) (Vulkan, reuse-before-rewrite), [ADR-42/47](../base-v4.5-v5.0/SmartFS_v4.5_to_v5.0_fixes.md) (zawór antygłodowy) | Wynika z pomiaru: [etap 6 Wielkiego Testu](../testing/the-great-smartfs-test.md)
 
-**Status:** Przyjęty 2026-09-14. ADR-49 wybrał *który* model. Ten ADR odpowiada na trzy pytania, których ADR-49 nie postawił, a bez których model nie może zacząć działać: **w jakim procesie** żyje, **w jakim katalogu** leżą jego wagi i **w jakim formacie** je pobieramy. Rozstrzyga przy okazji Otwarte pytanie z ADR-55 (jeden silnik inferencji czy dwa).
+**Status:** Przyjęty 2026-09-14. **Rewizja 2** (ten sam dzień, po uwadze właściciela projektu: „dobierz silniki tak, by oferowały max wydajność na każdym sprzęcie — idealnie żeby nawet na 1 GB VRAM istniała możliwość akceleracji na Vulkanie"). Rewizja 1 uzasadniała §1 prostotą — jeden silnik zamiast dwóch — co stawiało wydajność jako cenę porządku. To było odwrócone pytanie: maksimum wydajności na danym sprzęcie rozstrzyga się na poziomie **backendu i dyspozycji w czasie działania**, nie liczby silników. §1 jest przepisany wokół tego, z budżetem VRAM policzonym z pobranych plików, a nie ze specyfikacji; §3 traci przy okazji jedno zdanie postawione za mocno. Wniosek (`ggml`/GGUF) się nie zmienia — zmienia się to, co z niego wyciągamy.
+
+ADR-49 wybrał *który* model. Ten ADR odpowiada na trzy pytania, których ADR-49 nie postawił, a bez których model nie może zacząć działać: **w jakim procesie** żyje, **w jakim katalogu** leżą jego wagi i **w jakim formacie** je pobieramy. Rozstrzyga przy okazji Otwarte pytanie z ADR-55 (jeden silnik inferencji czy dwa).
 
 ---
 
@@ -50,21 +52,99 @@ Prawdziwy model nie umie wyprodukować 1536 wymiarów z przestrzeni 1024-wymiaro
 
 ## Decyzja
 
-### 1. Jeden silnik inferencji: `ggml`/`llama.cpp`, format GGUF — dla CPU i dla GPU
+### 1. Jeden silnik, wiele backendów, wybór przez pomiar — nie jeden backend z założenia
 
-ADR-55 zostawił to jako Otwarte pytanie („czy ujednolicić CPU i GPU pod jeden silnik, zamiast ONNX Runtime na CPU + `ggml` na GPU"). Rozstrzygamy je na **jeden silnik**, i to jest moment, w którym decyzja jest najtańsza: ścieżka CPU nie istnieje jeszcze w kodzie, więc nie ma czego migrować. Odkładając to, dopisalibyśmy `ort` + `tokenizers` + własną implementację poolingu tylko po to, żeby za jakiś czas napisać to drugi raz pod `ggml`.
+**Rewizja 2 zmienia tu rozumowanie, nie wniosek.** Rewizja 1 wybrała `ggml`/`llama.cpp` (format GGUF) i uzasadniła to prostotą: jeden format wag, tokenizer w pliku, pooling po stronie silnika. To zostaje. Ale postawiła to jako „jeden silnik zamiast dwóch", jakby ceną była wydajność, a zyskiem porządek. To było odwrócenie problemu. **Wymaganie brzmi: maksymalna wydajność na każdym sprzęcie** — a to jest pytanie o *backend i dyspozycję w czasie działania*, nie o liczbę silników.
 
-Za ujednoliceniem:
+`ggml` nie jest jednym backendem. Jest warstwą dyspozycyjną nad kilkoma: CPU z wyborem zestawu instrukcji w czasie działania (AVX2/AVX-512 na x86, NEON/i8mm/SVE na ARM), Vulkan, plus backendy wendorowe, które ADR-55 wyklucza zasadowo. „Max wydajność na każdym sprzęcie" realizuje się **wewnątrz** tego silnika i to on jest do tego narzędziem, nie przeszkodą.
 
-- **Jeden format artefaktu.** `Qwen/Qwen3-Embedding-0.6B-GGUF` to release oficjalny (Qwen), nie społecznościowa konwersja. Ścieżka ONNX wymagałaby `onnx-community/Qwen3-Embedding-0.6B-ONNX` — konwersji strony trzeciej, z osobnym łańcuchem zaufania dla wag.
-- **Tokenizer jest w pliku.** GGUF niesie tokenizer razem z wagami. ONNX wymaga osobnego `tokenizer.json` plus crate'a `tokenizers` — dwa artefakty, które mogą się rozjechać wersjami, i nic tego nie sprawdza.
-- **Pooling pisalibyśmy sami.** Qwen3-Embedding używa poolingu last-token z EOS plus normalizacji L2, a dla zapytań prefiksu instrukcyjnego. Przy ONNX to nasz kod (i nasz błąd, gdy się pomylimy — cicho, bo wektory zawsze *jakieś* wyjdą). `llama.cpp` ma to w API embeddingowym, przetestowane na tym konkretnym modelu.
-- **`gpu_acceleration = "vulkan" | "cpu"` przestaje być przełącznikiem między silnikami**, a staje się flagą jednego silnika. ADR-55 §7 zakładał to pole; przy dwóch silnikach oznaczałoby ono „inny kod, inny format modelu, inne błędy", co jest znacznie mocniejszą obietnicą niż nazwa sugeruje.
-- **Zasada reuse-before-rewrite z ADR-55** stosuje się tu tak samo jak do GPU.
+#### 1a. Tak, Vulkan compute kernels — i one już istnieją
 
-Cena, zapisana uczciwie: `llama-cpp-2` (bindingi FFI) wymaga CMake i kompilacji C++ w buildzie workspace'u — wolniej niż `ort` z pobieraną binarką. Akceptujemy to, bo ADR-55 i tak wprowadza tę zależność dla ścieżki GPU; alternatywą jest mieć **obie**.
+Pytanie „może Vulkan compute kernels?" ma odpowiedź, która jest lepsza, niż się wydaje: **backend Vulkan w `ggml` *jest* zestawem kerneli compute**. To shadery GLSL kompilowane do SPIR-V i uruchamiane przez `vkCmdDispatch` — żadnego potoku graficznego, czyste obliczenia. Nie trzeba ich pisać; trzeba ich dobrze użyć.
 
-Konsekwencją jest zmiana w [ADR-49](ADR-49-qwen-default-model.md): zapis „ONNX Runtime jako silnik CPU-baseline, odziedziczony bez zmian z v4.5 §3.7/§18" przestaje obowiązywać. ONNX Runtime nie pojawi się w projekcie w ogóle — nigdy nie był zaimplementowany, więc to nie jest wycofanie działającego kodu, tylko wycofanie planu.
+Warto odnotować zbieżność: [ADR-60](ADR-60-plugin-architecture-rust-spirv.md) dopuszcza w tym projekcie dokładnie dwa języki — Rust i SPIR-V. Silnik inferencji dostarczający swoje jądra jako SPIR-V nie jest wyjątkiem od tej zasady, tylko jej najlepszym przykładem.
+
+Pisanie własnych kerneli (CubeCL/`krnl`, odrzucone w ADR-55 rewizja 2) nadal nic tu nie daje, i to z konkretnego powodu: **problem małego VRAM-u nie jest problemem kerneli.** Rozwiązują go kwantyzacja i częściowy offload warstw — jedno i drugie `ggml` ma. Własny matmul nie zmniejszy modelu.
+
+#### 1b. Build: jedna binarka, która nie zakłada maszyny, na której powstała
+
+To jest miejsce, w którym najłatwiej stracić wydajność na cudzym sprzęcie, i robi się to jednym flagiem:
+
+| flaga CMake | wartość | po co |
+|---|---|---|
+| `GGML_VULKAN` | `ON` | jedyna dopuszczona akceleracja GPU (ADR-55) |
+| `GGML_CUDA`, `GGML_HIP` | `OFF` | binarka fizycznie nie zawiera kodu wendorowego |
+| `GGML_NATIVE` | `OFF` | **nie** `-march=native`: szybkie tu, `SIGILL` gdzie indziej |
+| `GGML_CPU_ALL_VARIANTS` + `GGML_BACKEND_DL` | `ON` | warianty CPU (AVX2, AVX-512, …) wybierane **w czasie startu**, po sprawdzeniu CPUID |
+
+Ostatni wiersz jest tym, co realizuje „max wydajność na każdym sprzęcie" na ścieżce CPU — bez niego mamy albo binarkę dostrojoną do maszyny budującej i wywracającą się na starszej, albo binarkę zbudowaną na najniższy wspólny mianownik i wolną na wszystkich.
+
+#### 1c. Backend wybierany pomiarem, nigdy założeniem
+
+ADR-55 zebrał liczby, które zakazują reguły „jest GPU, więc używaj GPU": na telefonach Vulkan przez `llama.cpp` bywa **~15× wolniejszy niż CPU tego samego urządzenia**. Reguła „użyj GPU, jeśli jest" byłaby wtedy regułą „bądź piętnaście razy wolniejszy".
+
+Dlatego: `smartfs-worker --calibrate` uruchamia stałą sondę (ustalony zestaw tekstów, ustalona długość kontekstu) na każdej kandydującej konfiguracji — CPU, Vulkan z pełnym offloadem, Vulkan z offloadem częściowym — i zapisuje zwycięzcę do `<model-path>/backend-calibration.json`. Klucz wpisu: UUID urządzenia + wersja sterownika + sha256 pliku modelu + wersja workera; zmiana któregokolwiek unieważnia pomiar, bo każde z nich może odwrócić wynik.
+
+Dwie reguły wokół tego, obie w duchu §0 Fail-Loud:
+
+- **Kalibracja nigdy nie odpala się sama przy montowaniu.** Demon systemu plików nie zatrzymuje się na trzydziestosekundowy benchmark. Jest osobnym, jawnym poleceniem, tak samo jak `fetch-models.sh`.
+- **Brak pomiaru znaczy CPU**, z wpisem w logu, że kalibracja nie była uruchomiona. Niezmierzone GPU jest traktowane jak nieobecne — nie jak szybsze.
+
+#### 1d. `llvmpipe` nie jest kartą graficzną
+
+Wykrywanie GPU musi odrzucać `VK_PHYSICAL_DEVICE_TYPE_CPU`. To nie jest hipotetyczne — `vulkaninfo` na tej maszynie wylicza dwa urządzenia:
+
+```
+GPU0: AMD Radeon R7 200 Series (RADV BONAIRE)   DISCRETE_GPU
+GPU1: llvmpipe (LLVM 20.1.2, 256 bits)          CPU          ← rasteryzator programowy
+```
+
+Naiwne „czy jest urządzenie Vulkan?" na maszynie bez karty znajdzie `llvmpipe`, zgłosi „akceleracja GPU włączona" i będzie liczyć **wolniej niż backend CPU**, bo to ten sam procesor, tylko przez sterownik graficzny. To dokładnie ta klasa kłamiącej metryki, którą ten projekt już dwa razy łapał.
+
+#### 1e. Mały VRAM: częściowy offload, nie wykluczenie
+
+Kluczowa własność: **`-ngl N` offloaduje N warstw, reszta liczy się na CPU.** Karta nie musi zmieścić całego modelu, żeby cokolwiek przyspieszyć. Do tego w embeddingach — inaczej niż w czacie — **to my wybieramy długość kontekstu**, bo i tak dzielimy plik na fragmenty. Zużycie VRAM jest więc pokrętłem polityki, nie wyrokiem sprzętu.
+
+Liczby zmierzone bezpośrednio z pobranych plików, nie ze specyfikacji modelu. Narzędzie, które je wypisuje, leży w repozytorium, żeby tabela poniżej była odtwarzalna, a nie do przepisania na wiarę:
+
+```
+scripts/gguf-info.py <model>.gguf --vram 1024 --ctx 1024
+```
+
+| | f16 | Q8_0 |
+|---|---:|---:|
+| `token_embd` (tablica wejściowa) | 296,2 MiB | 157,4 MiB |
+| 28 warstw (`blk`) | 840,2 MiB | 446,5 MiB |
+| **jedna warstwa** | **30,0 MiB** | **15,9 MiB** |
+| razem | 1136,5 MiB | 603,9 MiB |
+
+Architektura z tych samych nagłówków: 28 bloków, `embedding_length` 1024, 16 głów uwagi przy 8 głowach KV, `key/value_length` 128, `pooling_type = 3` (last-token — czyli pooling naprawdę przychodzi z pliku, jak zakładała rewizja 1). Stąd cache KV: `2 × 8 × 128 × 2 B × 28` = **112 KiB na token**.
+
+Budżet:
+
+```
+warstwy_na_gpu = min(28, ⌊(vram_wolny − 112 KiB × ctx − 128 MiB zapasu) / bajty_warstwy⌋)
+```
+
+| wolny VRAM | wariant | ctx | warstw na GPU |
+|---:|---|---:|---|
+| 1024 MiB | Q8_0 | 1024 | **28 z 28** — cały model, ~340 MiB zapasu |
+| 1024 MiB | f16 | 1024 | 26 z 28 — częściowy |
+| 512 MiB | Q8_0 | 512 | 20 z 28 |
+| 256 MiB | Q8_0 | 512 | 4 z 28 |
+
+**Odpowiedź na „idealnie żeby nawet 1 GB VRAM": przy Q8_0 karta z 1 GB mieści cały model z zapasem.** Nie jest to przypadek graniczny — jest z marginesem. Poniżej tego progu offload schodzi warstwami, aż do zera, i nic się po drodze nie psuje.
+
+Zastrzeżenie, którego nie wolno pominąć: liczy się VRAM **wolny**, nie całkowity, a na karcie obsługującej ekran jest on zmienny. Na tej maszynie `vulkaninfo` pokazuje 768 MiB sterty urządzenia, z czego wolne w chwili pomiaru było **35,8 MiB** — resztę trzyma pulpit. Ta karta (Bonaire, GCN 2 z 2013 r.) nie ma też `cooperative matrix` ani szybkiej arytmetyki fp16, więc `ggml` zejdzie na ścieżki zapasowe. Czy wyjdzie szybciej niż jej CPU — nie wiadomo, i właśnie dlatego rozstrzyga o tym §1c, a nie reguła.
+
+Drugi zastrzeżenie tej samej klasy: RADV wystawia stertę host-visible (tu 11,71 GiB), z której `ggml` potrafi alokować, gdy VRAM się skończy. Alokacja wtedy **się udaje**, a liczenie idzie przez PCIe i zwykle jest wolniejsze niż CPU. „Zmieściło się" nie znaczy „jest szybciej" — kolejny powód, żeby wynik ustalał pomiar.
+
+#### 1f. Dlaczego mimo wszystko nie drugi silnik
+
+Skoro celem jest maksimum na każdym sprzęcie, trzeba uczciwie sprawdzić, czy ONNX Runtime coś dokłada. Jego przewaga sprowadza się dziś do dostawców wykonawczych, których ten projekt i tak nie może użyć: QNN (Qualcomm, zamknięty), OpenVINO (tylko Intel), DirectML (tylko Windows), CUDA/TensorRT (wykluczone w ADR-55). Na sprzęcie w zakresie projektu — Linux, dowolny wendor — nie zostaje ani jedna konfiguracja, na której ORT wygrywa z `ggml`.
+
+Drugi silnik kosztowałby drugi format wag, drugą tokenizację, drugą implementację poolingu i drugi zestaw trybów awarii, **nie kupując ani jednej maszyny więcej**. Decyzja zostaje: jeden silnik, wiele backendów, wybór pomiarem.
+
 
 ### 2. Model żyje w osobnym procesie `smartfs-worker`, nadzorowanym jako dziecko `smartfsd`
 
@@ -112,7 +192,16 @@ Trzy miejsca, w których wagi **nie** mieszkają, każde z powodem:
 - **Nie w `--store-path`.** Katalog blobów jest enumerowany przez scrub (ADR-58 punkt 7) i sprzątacza (ADR-62). Plik, który nie jest blobem, a leży wśród blobów, to albo fałszywy alarm scrubu, albo — gorzej — kandydat do usunięcia dla sprzątacza.
 - **Nie na partycji systemowej.** Na maszynie testowej `/` ma 5,3 GB wolnego, a domyślne `/var/lib/smartfs/models` leży właśnie tam. Domyślna wartość zostaje zgodna z FHS, bo dla normalnego wdrożenia jest poprawna, ale **preflight (etap 0) sprawdza rozwiązaną ścieżkę tym samym `assert_not_on_root`, który już stosuje do pozostałych ścieżek zapisu**, a demon loguje ją przy starcie. Na tej maszynie: `SMARTFS_MODEL_PATH=/vectorlegis_ssd_pool/smartfs-models`.
 
-Domyślny wariant to **f16 (1,2 GB)**, nie Q8_0 (640 MB). Kwantyzacja psuje geometrię przestrzeni wektorowej, a to jest jedyne, co embedding sprzedaje; 600 MB oszczędności na maszynie z 298 GB wolnego to zły handel. Q8_0 zostaje pobrany i udokumentowany jako wariant dla sprzętu, gdzie f16 się nie mieści — wybór przez `--model-file`, nigdy automatyczny, bo automatyczna podmiana modelu za plecami zmienia przestrzeń wektorową bazy bez śladu w `embedding_models`.
+**Wariant artefaktu zależy od tego, gdzie model liczy** — rewizja 2 zmienia tu poprzednie ustalenie:
+
+- **Q8_0 (604 MiB) na ścieżce GPU.** To ten wariant mieści cały model w karcie z 1 GB VRAM (§1e), a to jest różnica między „akceleracja działa" a „karta za mała".
+- **f16 (1137 MiB) na ścieżce CPU** i tam, gdzie VRAM-u jest w nadmiarze.
+
+Rewizja 1 pisała tu, że „kwantyzacja psuje geometrię przestrzeni wektorowej". **To było postawione za mocno.** Q8_0 jest w pomiarach perplexity `llama.cpp` uznawany za praktycznie bezstratny; dopiero Q4 i niżej degradują realnie. Czy „praktycznie bezstratny" w perplexity znaczy to samo dla **kosinusów między embeddingami** — tego nie zmierzyłem i nie wiem, a jest to inna wielkość niż ta, którą tamte pomiary badały.
+
+Dlatego jest to teraz zadanie pomiarowe, nie założenie, i ma próg: na wspólnym zbiorze tekstów liczymy embeddingi obydwoma wariantami i sprawdzamy średni kosinus między parami f16↔Q8_0 tego samego tekstu oraz zgodność rankingu top-k. **Jeśli ranking się rozjeżdża, Q8_0 wypada ze ścieżki GPU i niska półka VRAM zostaje przy częściowym offloadzie f16** — bo tańsza akceleracja nie jest warta cichego pogorszenia wyszukiwania.
+
+Czego nie wolno w żadnym wariancie: **automatycznej podmiany pliku modelu za plecami.** Wybór idzie przez `--model-file`, a wariant jest zapisany razem z wynikiem kalibracji — zmiana wag to zmiana przestrzeni wektorowej i musi zostawiać ślad, tak samo jak zmiana modelu w `embedding_models`.
 
 ### 4. Brak modelu jest błędem głośnym; fałszywy silnik nigdy nie jest ścieżką produkcyjną
 
@@ -138,9 +227,13 @@ Centroidy: AST dostaje własną rodzinę (`concept_centroids_1024_qwen_ast` i to
 
 **Worker jako niezależny unit systemd, nie dziecko demona.** Czystszy operacyjnie i tak pewnie będzie wyglądać produkcyjne wdrożenie. Odrzucony **jako jedyny mechanizm**, bo odtwarza dokładnie ten tryb awarii, który ten ADR naprawia: komponent, który działa tylko wtedy, gdy ktoś pamiętał go włączyć. Nadzór przez `smartfsd` daje gwarancję, że działający montaż oznacza działającego workera (albo głośno zapisane `degraded`). Unit systemd może zostać dodany później jako alternatywa dla wdrożeń, które go chcą — wtedy `--no-embeddings` jest sposobem, żeby demon go nie dublował.
 
-**ONNX Runtime na CPU, `ggml` na GPU (stan planu przed tym ADR).** Odrzucony w punkcie 1: dwa silniki, dwa formaty wag, dwie implementacje poolingu, dwa zestawy trybów awarii — za coś, czego nikt nie zmierzył jako szybsze. Gdyby pomiar z §Konsekwencje pokazał, że `llama.cpp` na CPU jest istotnie wolniejszy niż ONNX Runtime dla tego modelu, ta decyzja wraca na stół z liczbami.
+**ONNX Runtime na CPU, `ggml` na GPU (stan planu przed tym ADR).** Odrzucony w §1f: przewagi ORT sprowadzają się do dostawców wykonawczych, których ten projekt nie może użyć (QNN, OpenVINO, DirectML, CUDA/TensorRT), więc na sprzęcie w zakresie — Linux, dowolny wendor — nie zostaje ani jedna konfiguracja, na której wygrywa. Drugi silnik kosztowałby drugi format wag, drugą tokenizację, drugi pooling i drugi zestaw trybów awarii, nie kupując ani jednej maszyny więcej. Wraca na stół, jeśli pomiar z §Konsekwencje pokaże `llama.cpp` na CPU istotnie wolniejszym dla tego modelu.
 
-**Kwantyzacja Q8_0 jako domyślna.** Odrzucona: oszczędza 600 MB na maszynie, która ma 298 GB wolnego, kosztem jedynej rzeczy, którą embedding dostarcza.
+**Własne kernele Vulkan (CubeCL/`krnl`) dla małego VRAM-u.** Odrzucone w §1a, i to nie dlatego, że pomysł jest zły, tylko dlatego, że celuje obok: backend Vulkan w `ggml` **już jest** zestawem kerneli compute w SPIR-V, a mały VRAM rozwiązuje kwantyzacja i częściowy offload warstw — nie szybszy matmul. Własne jądro nie zmniejszy modelu. Pozostaje zarezerwowane dokładnie tam, gdzie zostawił je ADR-55 §4.
+
+**Reguła „jest urządzenie Vulkan, więc licz na GPU".** Odrzucona przez liczby zebrane w ADR-55: na części sprzętu (telefony) ta reguła znaczy „bądź ~15× wolniejszy", a na maszynie bez karty trafiłaby w `llvmpipe`, czyli w ten sam procesor przez sterownik graficzny, meldując przy tym akcelerację. Stąd §1c: rozstrzyga pomiar, a brak pomiaru znaczy CPU.
+
+**Kwantyzacja Q8_0 jako jedyny wariant — albo f16 jako jedyny wariant.** Odrzucone oba. f16 wszędzie odcina od akceleracji karty z 1 GB VRAM (§1e); Q8_0 wszędzie przyjmuje bez pomiaru, że kwantyzacja nie rusza geometrii kosinusów. Wariant idzie za ścieżką wykonania, a próg dopuszczenia Q8_0 jest pomiarem opisanym w §3.
 
 **Trzymanie wag w `--store-path`, żeby „wszystko dane SmartFS-a było w jednym miejscu".** Odrzucone: model nie jest danymi SmartFS-a, a katalog blobów ma dwóch mieszkańców (scrub, sprzątacz), którzy enumerują jego zawartość i mają prawo zakładać, że wszystko w środku jest blobem.
 
@@ -155,13 +248,18 @@ Centroidy: AST dostaje własną rodzinę (`concept_centroids_1024_qwen_ast` i to
 - Migracja 010: `ast_embeddings_1024_qwen` plus rodzina centroidów dla niej.
 - Etap 6 przestaje być testem „czy ktoś włączył workera" i staje się testem tego, czym miał być: czy agent znajduje funkcję, którą ten etap właśnie zapisał. Do rozważenia przy implementacji: asercja, że wektor **nie** jest szumem — np. że funkcja o opisanym zachowaniu wypada wyżej niż losowa inna funkcja z tego samego przebiegu. Bez takiej asercji etap 6 nadal przeszedłby na fałszywym silniku.
 - Pozostaje niezmierzone i trzeba to zmierzyć przed uznaniem punktu 1 za zamknięty: **czas jednej inferencji na CPU tej maszyny**. ADR-49 wybrał 0,6B dokładnie dlatego, że zawór antygłodowy (ADR-42/FIX-05) zakłada inferencję rzędu dziesiątek–setek milisekund; jeśli `llama.cpp` na tym CPU da sekundy na plik, wraca livelock, który FIX-05 miał zamknąć. Etap 5 jest właściwym miejscem na tę liczbę.
+- Build `ggml` ma jawną macierz flag (§1b). Dwie z nich są łatwe do przeoczenia i kosztowne: `GGML_NATIVE=OFF` (inaczej binarka wywraca się `SIGILL` na starszym CPU niż budujący) oraz `GGML_CPU_ALL_VARIANTS=ON` z `GGML_BACKEND_DL=ON` (inaczej tracimy AVX-512/AMX tam, gdzie są). Do sprawdzenia w preflight razem z obecnością CMake.
+- `smartfs-worker` zyskuje `--calibrate` i czyta `<model-path>/backend-calibration.json` (§1c). Etap 0 sprawdza, czy plik istnieje i czy jego klucz pasuje do bieżącego sprzętu — nie po to, żeby oblać, tylko żeby wynik etapu 5 dało się później czytać ze świadomością, na czym liczył.
+- Dwa pomiary są teraz warunkiem zamknięcia §1, obok czasu inferencji: **(a)** CPU kontra Vulkan na tej karcie (Bonaire/GCN 2, 768 MiB dzielone z pulpitem — całkiem możliwe, że CPU wygrywa i to jest poprawny wynik, nie porażka); **(b)** zgodność kosinusów i rankingu top-k między f16 a Q8_0 (§3), bo od niej zależy, czy niska półka VRAM w ogóle dostaje akcelerację.
 - `search_fulltext` pozostaje niezależnie zepsuty — brak `pg_search` (etap 6, §6.4). Ten ADR go nie dotyczy.
 
 ## Stan pobrania (wykonane przy przyjęciu tego ADR)
 
 Repozytorium `Qwen/Qwen3-Embedding-0.6B-GGUF` jest **publiczne i niebramkowane** (`gated: false`) — pobranie nie wymagało tokenu Hugging Face i nie ma powodu, żeby projekt taki token w ogóle przechowywał. Gdyby kiedyś pojawił się model bramkowany, token jest sekretem środowiska, nigdy plikiem w repo.
 
-Artefakty i sumy kontrolne: `SHA256SUMS` w katalogu modelu.
+Artefakty i sumy kontrolne: `SHA256SUMS` w katalogu modelu; te same sumy są przypięte w `scripts/fetch-models.sh`, który odmawia przyjęcia pliku wag niezgodnego z nimi — plik o innej sumie to nie „nowszy upload", tylko inny model, produkujący inną przestrzeń wektorową niż ta, którą opisuje `embedding_models`.
+
+Wszystkie liczby o rozmiarach warstw i architekturze w §1e pochodzą z **nagłówków tych konkretnych plików**, odczytanych przez `scripts/gguf-info.py`, nie ze specyfikacji modelu. Ma to znaczenie przy budżecie VRAM: gdyby wagi kiedyś podmieniono, budżet trzeba przeliczyć z nowego pliku, a nie przepisać stąd.
 
 ## Otwarte pytanie
 

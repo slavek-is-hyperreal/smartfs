@@ -61,3 +61,15 @@ Pytanie „czy warto docelowo ujednolicić CPU i GPU pod jeden silnik (`ggml` dl
 Powód, dla którego moment jest właściwy: ścieżka CPU nie istniała jeszcze w kodzie. `smartfs-ai` nie miał zależności `ort`, a `CpuEmbeddingEngine` nie ładował żadnego modelu — nie było więc czego migrować. Odkładanie decyzji oznaczałoby napisanie ładowania modelu, tokenizacji i poolingu pod ONNX, żeby za jakiś czas napisać to drugi raz pod `ggml`.
 
 Skutek dla tego ADR: `gpu_acceleration = "vulkan" | "cpu"` przestaje być przełącznikiem *między silnikami* i staje się flagą jednego silnika — czyli znaczy dokładnie to, co jego nazwa obiecywała.
+
+### Uzupełnienie po rewizji 2 ADR-63
+
+Trzy rzeczy, które doprecyzowują ten ADR, a wyszły dopiero przy liczeniu budżetu VRAM:
+
+1. **„Backend Vulkan" w `ggml` to zestaw kerneli compute w SPIR-V** — shadery GLSL kompilowane do SPIR-V i uruchamiane przez `vkCmdDispatch`, bez potoku graficznego. Warto to nazwać wprost, bo pytanie „a może napisać kernele Vulkan?" ma odpowiedź „one już są", a nie „to inna droga". Zbieżnie z [ADR-60](ADR-60-plugin-architecture-rust-spirv.md), który dopuszcza w projekcie dokładnie Rust i SPIR-V.
+
+2. **Mały VRAM nie wyklucza akceleracji.** `-ngl N` offloaduje N warstw, reszta zostaje na CPU, a w embeddingach długość kontekstu wybieramy sami, więc cache KV jest pokrętłem, nie wyrokiem. Zmierzone z pliku: warstwa Q8_0 to 15,9 MiB, cache KV 112 KiB na token — **karta z 1 GB VRAM mieści cały ten model (28 z 28 warstw) z zapasem**. Pełna tabela progów w [ADR-63](ADR-63-embedding-model-placement.md) §1e.
+
+3. **`llvmpipe` wygląda w Vulkanie jak urządzenie i nie jest kartą.** Wykrywanie musi odrzucać `PHYSICAL_DEVICE_TYPE_CPU`, inaczej maszyna bez GPU zamelduje akcelerację i będzie liczyć wolniej niż backend CPU. Na maszynie testowej `vulkaninfo` wylicza je jako GPU1 obok prawdziwej karty — to nie jest przypadek hipotetyczny.
+
+Konsekwencja dla zapisanej tu zasady „GPU jest bonusem, nigdy wymogiem": zostaje bez zmian, ale zyskuje mechanizm. O tym, czy bonus się opłaca, rozstrzyga pomiar per maszyna (`smartfs-worker --calibrate`, ADR-63 §1c), nie reguła — dokładnie dlatego, że zebrane wyżej liczby pokazują sprzęt, na którym GPU jest wolniejsze niż CPU.

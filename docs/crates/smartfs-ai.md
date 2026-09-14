@@ -75,7 +75,13 @@ Dlaczego osobny proces, a nie wątek: worker ładuje ~1,2 GB wag przez natywny k
 
 Struktura nazywa się teraz `HashEmbeddingEngine` i jest opisana jako to, czym jest — deterministyczna atrapa do testów przepływu wierszy, **bez znaczenia semantycznego**, niewybieralna żadną flagą ani konfiguracją.
 
-Prawdziwa inferencja idzie przez `llama-cpp-2` (FFI do `ggml`) na pliku GGUF. Jeden silnik dla CPU i GPU — patrz ADR-63 §1 i rozstrzygnięcie Otwartego pytania w [ADR-55](../adr/ADR-55-gpu-acceleration.md). Konsekwencja dla buildu: workspace zaczyna wymagać CMake i kompilatora C++.
+Prawdziwa inferencja idzie przez `llama-cpp-2` (FFI do `ggml`) na pliku GGUF. Jeden silnik, ale **wiele backendów** — CPU z wyborem zestawu instrukcji w czasie startu i Vulkan — a o tym, który liczy, rozstrzyga pomiar zapisany w `<model-path>/backend-calibration.json`, nie reguła (ADR-63 §1c). Brak pomiaru znaczy CPU.
+
+Worker zyskuje `--calibrate`, który ten pomiar wykonuje. **Nigdy nie odpala się sam przy montowaniu** — demon systemu plików nie staje na benchmark.
+
+Konsekwencja dla buildu: workspace zaczyna wymagać CMake i kompilatora C++, a flagi `ggml` mają znaczenie wydajnościowe (`GGML_NATIVE=OFF`, `GGML_CPU_ALL_VARIANTS=ON`, `GGML_BACKEND_DL=ON`, `GGML_VULKAN=ON`, `GGML_CUDA/HIP=OFF`) — patrz tabela w ADR-63 §1b.
+
+Wariant wag idzie za ścieżką wykonania: f16 na CPU, **Q8_0 na GPU**, bo to ten wariant mieści cały model w karcie z 1 GB VRAM (15,9 MiB na warstwę, 28 warstw, cache KV 112 KiB na token — ADR-63 §1e).
 
 ### 3. Model na dysku i zakaz cichego fallbacku
 
