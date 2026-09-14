@@ -53,3 +53,11 @@ Czy warto docelowo ujednolicić CPU i GPU pod jeden silnik (`ggml` dla obu, zami
 - Dokumentacja instalacyjna musi jasno powiedzieć: (a) na desktopowym AMD/NVIDIA Vulkan będzie wolniejszy niż odpowiednio ROCm/CUDA — świadoma cena zasady, nie błąd; (b) na telefonach ścieżka GPU może dziś być **wolniejsza niż CPU** z powodu nierozwiązanego problemu w `llama.cpp` (`#9464`) — `gpu_acceleration=cpu` pozostaje zalecaną, bezpieczną wartością na takim sprzęcie, dopóki upstream tego nie naprawi.
 - `smartfs-ai` musi wykrywać i jawnie logować, z którego silnika (`ort`/CPU czy `ggml`/Vulkan) faktycznie korzysta — bez zmian względem rewizji 1.
 - Minimalne wymagania sprzętowe projektu pozostają: CPU + tyle RAM, ile wymaga wybrany model embeddingowy (ADR-49) — żadnej karty graficznej, żadnego konkretnego wendora.
+
+## Rozstrzygnięcie Otwartego pytania (2026-09-14)
+
+Pytanie „czy warto docelowo ujednolicić CPU i GPU pod jeden silnik (`ggml` dla obu, zamiast ONNX Runtime na CPU + `ggml` na GPU)" rozstrzygnięte w [ADR-63](ADR-63-embedding-model-placement.md) §1 na **tak, i to teraz**.
+
+Powód, dla którego moment jest właściwy: ścieżka CPU nie istniała jeszcze w kodzie. `smartfs-ai` nie miał zależności `ort`, a `CpuEmbeddingEngine` nie ładował żadnego modelu — nie było więc czego migrować. Odkładanie decyzji oznaczałoby napisanie ładowania modelu, tokenizacji i poolingu pod ONNX, żeby za jakiś czas napisać to drugi raz pod `ggml`.
+
+Skutek dla tego ADR: `gpu_acceleration = "vulkan" | "cpu"` przestaje być przełącznikiem *między silnikami* i staje się flagą jednego silnika — czyli znaczy dokładnie to, co jego nazwa obiecywała.

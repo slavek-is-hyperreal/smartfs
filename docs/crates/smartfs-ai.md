@@ -56,3 +56,33 @@ Patrz [ADR-54](../adr/ADR-54-fulltext-search-backend.md) po pełne uzasadnienie.
 ## Reszta bez zmian
 
 Supervisor loop, tree-sitter, `claim_pending_to_processing`, anti-starvation valve (ADR-42), retry z exponential backoff — wszystko z v5.0 bez zmian.
+
+## Delta ADR-63 — punkt wejścia, silnik, model na dysku
+
+Trzy rzeczy, których ten dokument dotąd nie mówił, bo do przyjęcia [ADR-63](../adr/ADR-63-embedding-model-placement.md) nie były rozstrzygnięte:
+
+### 1. `[[bin]] smartfs-worker` — punkt wejścia, którego nie było
+
+`run_worker_supervisor` (`worker.rs:141`) nie był wołany przez nic: crate nie miał celu binarnego, a ani `smartfsd`, ani `smartfs-cli` nie referowały `smartfs_ai`. Skutkiem była pusta tabela embeddingów przy działającym, kompletnym kodzie workera — wykryte dopiero przez etap 6 Wielkiego Testu.
+
+Teraz `smartfs-ai` ma binarkę `smartfs-worker`, a `smartfsd` uruchamia ją jako **proces potomny** w kroku 9 startu, z `PR_SET_PDEATHSIG` (śmierć demona zabija workera — istotne dla etapu 4, który ubija demona 25 razy na przebieg) i restartem z backoffem. Wyłączenie: `--no-embeddings` na demonie, symetryczne do `--no-semantic`.
+
+Dlaczego osobny proces, a nie wątek: worker ładuje ~1,2 GB wag przez natywny kod C++, docelowo rozmawiający ze sterownikiem GPU. Jego upadek nie może odmontować systemu plików. To ten sam argument, którym [docs/02-crates.md](../02-crates.md) uzasadnia, że `smartfs-semantic` nie zależy od `smartfs-ai` — tu zastosowany o poziom niżej, do przestrzeni adresowej zamiast do grafu zależności.
+
+### 2. Silnik: `ggml`/`llama.cpp`, GGUF — nie ONNX Runtime
+
+`CpuEmbeddingEngine` **nie uruchamiał żadnego modelu**: liczył SHA-256 z tekstu, rozwijał go w `dimensions` kolejnych hashy i normalizował L2. Doc-comment mówił „ONNX model compatibility", a `Cargo.toml` nie miał ani `ort`, ani `tokenizers`. Nazwa i komentarz opisywały rzecz, której nie było.
+
+Struktura nazywa się teraz `HashEmbeddingEngine` i jest opisana jako to, czym jest — deterministyczna atrapa do testów przepływu wierszy, **bez znaczenia semantycznego**, niewybieralna żadną flagą ani konfiguracją.
+
+Prawdziwa inferencja idzie przez `llama-cpp-2` (FFI do `ggml`) na pliku GGUF. Jeden silnik dla CPU i GPU — patrz ADR-63 §1 i rozstrzygnięcie Otwartego pytania w [ADR-55](../adr/ADR-55-gpu-acceleration.md). Konsekwencja dla buildu: workspace zaczyna wymagać CMake i kompilatora C++.
+
+### 3. Model na dysku i zakaz cichego fallbacku
+
+Ścieżka rozstrzygana jak `--store-path`: `--model-path` → `SMARTFS_MODEL_PATH` → `/var/lib/smartfs/models`. Wagi pobiera jawnie `scripts/fetch-models.sh` (weryfikuje sha256 względem sum przypiętych w ADR-63); demon nigdy nie pobiera niczego przy starcie.
+
+Gdy modelu nie ma albo nie da się go załadować: `error` z pełną ścieżką i niezerowy kod wyjścia workera, `embeddings=degraded` w pliku gotowości demona, system plików serwuje dalej. **Żadnego fallbacku na inny model** — model wyznacza przestrzeń wektorową, więc podstawienie innego wstawiłoby do jednej tabeli wektory z dwóch przestrzeni (Invariant #5 czytany na poziomie wiersza).
+
+### 4. Poprawka wymiaru AST
+
+`embed_version` wołał `engine.embed(&node.source, 1536)` i wstawiał wynik do `ast_embeddings_1536` z `model_id` modelu **1024-wymiarowego**. Działało to wyłącznie dzięki atrapie generującej dowolną liczbę wymiarów na żądanie. Po ADR-63 §5: migracja 010 tworzy `ast_embeddings_1024_qwen` (plus własną rodzinę centroidów), a `ast_embeddings_1536` zostaje tabelą `text-embedding-3-large`, dla której powstała w migracji 002.

@@ -46,3 +46,11 @@ Rodzina Qwen (stan na moment pisania) nie ma dojrzałego, kontrastywnie trenowan
 - **BGE-M3** (768d) jest **zachowany** dla zewnętrznych, prekalkulowanych korpusów (Wikipedia, encyklopedie — ADR-06). Tabele (`embeddings_768`, `concept_centroids_768`) pozostają w schemacie.
 - **Qwen3-Embedding-4B** (2560d) to przyszły tier dokładnościowy, post-MVP — brak tabeli `embeddings_2560` w aktualnym schemacie.
 - **Fallback offline:** jeśli domyślny model nie jest dostępny w czasie uruchomienia, fallback idzie na aktywny model `is_default=TRUE` w chwili startu — nie na zahardkodowaną stałą MiniLM.
+
+## Addendum 2 (2026-09-14) — dwa zapisy powyżej zastąpione przez [ADR-63](ADR-63-embedding-model-placement.md)
+
+1. **Silnik inferencji.** Zapis „ONNX Runtime jako silnik CPU-baseline, odziedziczony bez zmian z v4.5 §3.7/§18; ADR-49 zmienił wyłącznie *model*, nie silnik" przestaje obowiązywać. ADR-63 §1 rozstrzyga Otwarte pytanie z ADR-55 na **jeden silnik dla CPU i GPU**: `ggml`/`llama.cpp`, format GGUF, oficjalny release `Qwen/Qwen3-Embedding-0.6B-GGUF`. ONNX Runtime nie był nigdy zaimplementowany (crate `smartfs-ai` nie ma zależności `ort`), więc jest to wycofanie planu, nie działającego kodu.
+
+2. **Fallback offline.** Zapis „jeśli domyślny model nie jest dostępny w czasie uruchomienia, fallback idzie na aktywny model `is_default=TRUE` w chwili startu" jest pusty — brakujący model *jest* modelem `is_default=TRUE`. ADR-63 §4 zastępuje go regułą **bez fallbacku**: model wyznacza przestrzeń wektorową, więc ciche podstawienie innego wstawiłoby do jednej tabeli wektory z dwóch przestrzeni. Brak modelu jest błędem głośnym; `smartfsd` zapisuje `embeddings=degraded` i serwuje system plików dalej.
+
+3. **Wymiar AST.** ADR-49 przeprowadził cutover 384→1024 na poziomie plików (`embeddings_1024_qwen`), ale przeoczył `ast_embeddings_1536`, do której kod wstawia wektory z modelu 1024-wymiarowego. ADR-63 §5 domyka to samą metodą: migracja 010 tworzy `ast_embeddings_1024_qwen`, a `ast_embeddings_1536` zostaje jako tabela `text-embedding-3-large`.
