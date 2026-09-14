@@ -23,6 +23,12 @@ pub struct SystemStatus {
     /// Age of the oldest such marker. A number that only grows is the signal
     /// that the drain is stuck.
     pub pending_queue_oldest_age_secs: Option<f64>,
+    /// Blobs outside the dedup index (ADR-62). Deleting the file that owns one
+    /// frees its space at once; a shared blob's space returns only when the
+    /// cleaner can prove nothing references it.
+    pub private_blob_count: i64,
+    /// Blobs participating in dedup.
+    pub shared_blob_count: i64,
 }
 
 /// @id: 4e0a9b31-27cd-4c85-a9f2-8d61b3e0c47a
@@ -75,6 +81,15 @@ pub async fn handle_status(
 
     let (queue_depth, queue_oldest) = read_pending_queue_state(store_path).await?;
 
+    // ADR-62 §Rozstrzygnięcia #2: whether a delete frees space is a property of
+    // the blob, not of the inode's dedup flag, so the split has to be visible.
+    let (private_blobs, shared_blobs) = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT count(*) FILTER (WHERE NOT shared), count(*) FILTER (WHERE shared) FROM blobs",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or((0, 0));
+
     Ok(SystemStatus {
         pending_backlog_count: backlog,
         oldest_pending_age_secs: oldest_age,
@@ -82,5 +97,7 @@ pub async fn handle_status(
         calibrated_models_count: combos.len(),
         pending_queue_depth: queue_depth,
         pending_queue_oldest_age_secs: queue_oldest,
+        private_blob_count: private_blobs,
+        shared_blob_count: shared_blobs,
     })
 }

@@ -164,6 +164,43 @@ Rozstrzygnięcia wyżej nie znaczą, że wszystko wchodzi naraz. Kolejność wyn
 
 Faza C jest świadomie ostatnia. Odwraca kolejność `insert_blob` → `store.put`, czyli dokładnie to, na czym stoją FIX-03 i FIX-04, i mierzą to punkty K1–K5 etapu 4 — który **dziś nie kończy jeszcze czystego przebiegu**. Wdrażanie zmiany semantyki crashowej, gdy jedyny instrument zdolny ją sprawdzić sam nie działa, byłoby zgadywaniem. Faza C czeka na zielony etap 4 i na przepisany §5.2 planu.
 
+## Wynik pomiaru fazy C
+
+Zmierzone 2026-09-14 na commicie `9b45baf`, izolowanym etapem 5 (bez pjdfstest i crash-testu przed nim), obie strony z nieskażonego logu.
+
+**Ścieżka zapisu, mediana z 200 zapisów:**
+
+| faza | przed C | po C |
+|---|---:|---:|
+| dedup (`insert_blob`) | **43,34** | — |
+| blob (kompresja + `store.put`) | 25,81 | — |
+| `compress` | — | 0,07 |
+| `store.put` | — | 1,48 |
+| znacznik | 1,98 | 1,37 |
+| lookup inode'a | 0,70 | 0,54 |
+| hash | 0,04 | 0,03 |
+| **razem** | **74,45 ms** | **3,77 ms** |
+
+**Opóźnienie `close()`, ta sama metodologia:**
+
+| | p50 | p99 |
+|---|---:|---:|
+| `b60a58a`, przed C (dwa przebiegi) | 57,40 i 77,56 ms | 195–213 ms |
+| `9b45baf`, po C | **8,24 ms** | **19,05 ms** |
+
+Ścieżka zapisu skróciła się **dwudziestokrotnie**, a `close()` siedmio- do dziewięciokrotnie przy rozrzucie przebieg-do-przebiegu rzędu 30%. Ani jednego commitu do Postgresa nie ma już na tej ścieżce — zostało jedno tanie zapytanie odczytowe (`lookup`, 0,54 ms).
+
+**Koszt odroczenia, rozdzielony i potwierdzony:**
+
+| | MB/s |
+|---|---:|
+| pierwszy zapis treści | 31,6 |
+| zapis duplikatu | 13,8 |
+
+Duplikat jest ~2,3× wolniejszy, bo pisarz nie wie jeszcze, że treść istnieje: kompresuje i zapisuje pełną kopię, którą drenaż zaraz kasuje. **To jest dokładnie kompromis z punktu 5 Decyzji, zmierzony zamiast obiecanego** — i powód, dla którego `dedup_enabled` jest przełącznikiem, a nie decyzją globalną. Dla obciążenia z rzadkimi duplikatami wygrywa się dwudziestokrotnie na opóźnieniu; dla backupów traci się dwukrotnie na przepustowości.
+
+Pierwotny pomiar fazy C był **skażony** i został wycofany: `start_daemon` dopisuje do `smartfsd.log`, a etap 5 agregował cały plik, mieszając mediany z kilku commitów. Zdradziło to `blob = 7,93 ms` dla odcinka między dwoma kolejnymi `Instant::now()`. Naprawione w `9b45baf`; `close()` nigdy nie było skażone, bo mierzy je sam skrypt.
+
 ## Odniesienia
 
 - Pomiar faz i izolacja przyczyny: [PLAN §5c](../plans/PLAN-posix-parity-and-storage-policy.md)

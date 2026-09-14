@@ -326,3 +326,29 @@ pub async fn insert_blob_tx(
         inserted,
     })
 }
+
+/// @id: 0a7f1c96-5e38-4d02-b4a9-6318fd07e2b5
+/// How many of an inode's versions sit on private versus shared blobs (ADR-62).
+///
+/// Exists because ADR-62 §Rozstrzygnięcia #2 makes a promise it would otherwise
+/// be impossible to check: whether deleting a file frees its space is a property
+/// of the blob, not of `inode_registry.dedup_enabled`. Turning the flag off does
+/// not retroactively unshare anything, so a user who reads the flag and infers
+/// the guarantee can be wrong. A guarantee nobody can verify is a trap, so the
+/// state is reportable.
+pub async fn inode_blob_sharing(pool: &PgPool, inode_id: Uuid) -> Result<(i64, i64)> {
+    sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT
+            count(*) FILTER (WHERE NOT b.shared) AS private,
+            count(*) FILTER (WHERE b.shared)     AS shared
+        FROM file_versions fv
+        JOIN blobs b ON b.blob_id = fv.blob_id
+        WHERE fv.inode_id = $1
+        "#,
+    )
+    .bind(inode_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| SmartFsError::Db(format!("inode_blob_sharing error: {e}")))
+}

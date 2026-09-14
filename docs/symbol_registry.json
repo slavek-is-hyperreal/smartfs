@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-14T06:22:06.376041527Z",
+  "generated_at": "2026-09-14T06:28:31.790454876Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -635,7 +635,7 @@
       "kind": "Function",
       "name": "handle_status",
       "last_known_file": "crates/smartfs-cli/src/commands/status.rs",
-      "last_known_line": 64,
+      "last_known_line": 70,
       "doc_summary": "Handles execution of the `status` command.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -657,7 +657,7 @@
       "kind": "Function",
       "name": "read_pending_queue_state",
       "last_known_file": "crates/smartfs-cli/src/commands/status.rs",
-      "last_known_line": 36,
+      "last_known_line": 42,
       "doc_summary": "Reads the ADR-58 pending queue: how many writes are durable but not yet",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -701,7 +701,7 @@
       "kind": "Function",
       "name": "run_cli",
       "last_known_file": "crates/smartfs-cli/src/dispatch.rs",
-      "last_known_line": 189,
+      "last_known_line": 194,
       "doc_summary": "Runs the SmartFS CLI application with the given arguments.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1231,6 +1231,17 @@
       "last_known_file": "crates/smartfs-db/src/embeddings.rs",
       "last_known_line": 145,
       "doc_summary": "Look up an embedding model by its exact name.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "0a7f1c96-5e38-4d02-b4a9-6318fd07e2b5",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "inode_blob_sharing",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 339,
+      "doc_summary": "How many of an inode's versions sit on private versus shared blobs (ADR-62).",
       "tombstoned": false,
       "tombstoned_reason": null
     },

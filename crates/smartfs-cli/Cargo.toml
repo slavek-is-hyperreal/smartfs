@@ -9,6 +9,7 @@ description = "Command-line interface and client library for SmartFS"
 [dependencies]
 smartfs-schema = { workspace = true }
 smartfs-db = { workspace = true }
+sqlx = { workspace = true }
 smartfs-semantic = { workspace = true }
 smartfs-store = { workspace = true }
 smartfs-compress = { workspace = true }

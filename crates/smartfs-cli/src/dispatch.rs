@@ -154,13 +154,18 @@ pub async fn dispatch_command(
                  Calibrated models:     {}\n\
                  Write queue (ADR-58, on disk):\n  \
                  Uncommitted markers:   {}\n  \
-                 Oldest marker age:     {}",
+                 Oldest marker age:     {}\n\
+                 Blobs (ADR-62):\n  \
+                 Private (fast delete): {}\n  \
+                 Shared (deduplicated): {}",
                 res.pending_backlog_count,
                 age_str,
                 res.unconsolidated_embedding_count,
                 res.calibrated_models_count,
                 res.pending_queue_depth,
-                queue_age
+                queue_age,
+                res.private_blob_count,
+                res.shared_blob_count
             ))
         }
         Commands::Recover(args) => {

@@ -18,7 +18,7 @@ pub mod worker;
 
 pub use blobs::{
     compensate_blob_delete, dedup_check, delete_blob_if_unreferenced, get_blob, insert_blob,
-    insert_blob_tx, insert_blob_with_sharing, list_blob_digests, list_unreferenced_blobs, private_blob_of_inode,
+    inode_blob_sharing, insert_blob_tx, insert_blob_with_sharing, list_blob_digests, list_unreferenced_blobs, private_blob_of_inode,
     update_blob_compressed_size,
 };
 pub use embeddings::{
