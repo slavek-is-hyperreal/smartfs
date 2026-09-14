@@ -214,6 +214,37 @@ Z tego wynikają dwie zasady:
 Praktyczna konsekwencja dla bisectu wydajnościowego: zamiast przewijać commity, instrumentuj. Rozbicie `close()` na fazy (`590bbb2`) odpowiada „gdzie idą milisekundy" bez dotykania repozytorium i zostaje jako narzędzie.
 
 
+## 6c. Etap 6 — warstwa semantyczna, czyli to, po co ten system istnieje
+
+Etapy 1–4 dowodzą, że SmartFS jest systemem plików. Etap 5 mierzy, jak szybkim. **Żaden z nich nie pyta, czy warstwa semantyczna cokolwiek widzi** — a to jest rzecz, dla której ten projekt powstał.
+
+Ta luka przykryła realną: przegląd żywej bazy dał **11 węzłów AST na 220 wersji, 2 embeddingi funkcji i brak rozszerzenia `pg_search`**. Rura jest podłączona na całej długości i prawie nic przez nią nie przepłynęło. Nic nie oblało, bo nikt nie patrzył.
+
+Etap 6 przechodzi łańcuch ogniwo po ogniwie, oblewając na pierwszym pęknięciu:
+
+```
+zapis .rs przez mount
+  → flush() uruchamia tree-sitter        → wiersze ast_nodes
+  → release() kolejkuje, drenaż commituje → wiersz file_versions
+  → worker smartfs-ai liczy embeddingi    → ast_embeddings_1536
+  → MCP search_functions znajduje po nazwie → agent to widzi
+```
+
+Każde ogniwo ma osobną asercję nazywającą, co pękło — „wyszukiwanie semantyczne nic nie zwróciło" samo w sobie jest bezużyteczne, bo może oznaczać którykolwiek z pięciu komponentów.
+
+### Znalezisko, które ten etap unieruchamia
+
+**`smartfs-ai::run_worker_supervisor` (worker.rs:141) nie jest przez nic wołany.** Crate nie ma `[[bin]]`, a ani `smartfsd`, ani `smartfs-cli` nie odwołują się do `smartfs_ai` w ogóle. To **trzeci przypadek tego samego wzorca**, po `smartfs-fuse` (skatalogowanym w §1.1 planu) i `smartfs-mcp` (znalezionym później): kompletny komponent bez punktu wejścia, który by go włączył.
+
+Skutek: każde narzędzie MCP czytające embeddingi jest trwale puste, a kolejka `pending` w `file_versions` rośnie bez końca — przy pisaniu tego było w niej 14 wersji, najstarsza od piętnastu godzin.
+
+**Gdzie ma mieszkać ten worker, to decyzja architektoniczna, nie poprawka.** Demon hostuje już supervisory konsolidacji (§1.3 krok 9) i to samo rozumowanie tu pasuje — ale `smartfs-ai` ładuje modele ONNX do pamięci, więc uruchomienie go wewnątrz demona FUSE znaczy, że system plików nosi w sobie wagi modelu. To jest kompromis, którego nie rozstrzygam sam; wymaga ADR-a.
+
+### `search_fulltext` nie może dziś działać
+
+`pg_search` nie jest zainstalowany, indeksów BM25 jest zero. Migracja 006 tworzy je warunkowo, więc **migracja przechodzi, a zdolność po cichu nie istnieje**. ADR-54 wybrał `pg_search` świadomie, dla polskiego stemmingu; wdrożenie bez niego działa bez udokumentowanej funkcji. Etap 6 oblewa na tym jawnie, zamiast pozwolić wnioskować to z pustego wyniku.
+
+
 ## 7. Znaleziska otwarte
 
 - **Etap 4, Invariant #3 — nierozstrzygający.** 82 z 83 porażek to jedna klasa: po `kill -9` plik jest widoczny z treścią, która nie ma jeszcze wiersza `file_versions`, bo jego znacznik czeka w `pending/queue/`, a nakładka odczytu z ADR-58 go serwuje. §5.3 planu został pod to zrewidowany (najpierw quiesce), ale `04_crash_consistency_test.sh` nigdy nie dostał tej samej poprawki. Sprawdzian nie odróżnia dziś „zakolejkowane, zaraz się zacommituje" (legalne) od „widoczne, a nigdzie nie zapisane" (realne naruszenie). Do naprawy w skrypcie, ze zgłoszeniem.

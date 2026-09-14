@@ -52,7 +52,7 @@ INSTALL_APT=1
 RUN_XFSTESTS=0
 WATCH=0
 WATCH_TIMEOUT="${WATCH_TIMEOUT:-43200}"   # 12h of idling, then root is released
-ALL_STAGES="0 1 2 3 4 5"
+ALL_STAGES="0 1 2 3 4 5 6"
 STAGES="$ALL_STAGES"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -326,6 +326,8 @@ do_run() {
   run_stage 4 04_crash_consistency_test.sh      "crash consistency"
   wait_for_postgres || true
   run_stage 5 05_perf_diagnostics.sh            "perf diagnostics (record-only)"
+  wait_for_postgres || true
+  run_stage 6 06_semantic_pipeline_test.sh      "semantic pipeline through MCP"
 
   # ── optional: the multi-hour generic/ run ──────────────────────────────────
   if (( RUN_XFSTESTS )) && [[ -x "${REPO}/third_party/xfstests/check-smartfs" ]]; then
@@ -358,7 +360,7 @@ do_run() {
     echo "crash instrumentation: $("${REPO}/target/debug/smartfsd" --crash-points >/dev/null 2>&1 && echo 'present' || echo 'ABSENT (Stage 0b not implemented; Stage 4 stochastic-only by design)')"
     echo
     echo "stage exit codes (0 = pass, anything else = FAIL):"
-    for k in 0 1 2 3 4 5 3g; do
+    for k in 0 1 2 3 4 5 6 3g; do
       [[ -v EXIT_CODE[$k] ]] && printf '  stage %-3s : %s\n' "$k" "${EXIT_CODE[$k]}"
     done
     echo
@@ -380,7 +382,7 @@ do_run() {
 
   say "SUMMARY (iteration ${ITERATION})"
   FAILED=0
-  for k in 0 1 2 3 4 5 3g; do
+  for k in 0 1 2 3 4 5 6 3g; do
     if [[ -v EXIT_CODE[$k] ]]; then
       if (( ${EXIT_CODE[$k]} == 0 )); then
         printf '%s  stage %-3s PASS%s\n' "$C_GRN" "$k" "$C_OFF"
