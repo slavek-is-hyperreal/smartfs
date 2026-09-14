@@ -1,6 +1,6 @@
 {
   "_comment": "Written by scripts/version_bump.py. Hash covers each crate's src/tests/benches/examples/build.rs plus its Cargo.toml with the version line removed.",
-  "updated_at": "2026-09-13T14:26:25+00:00",
+  "updated_at": "2026-09-14T14:07:46+00:00",
   "crates": {
     "smartfs-ai": {
       "version": "0.1.0",
@@ -8,8 +8,8 @@
       "path": "crates/smartfs-ai"
     },
     "smartfs-cli": {
-      "version": "0.1.1",
-      "hash": "d8d2b49e28167aba530c7095960289836b9fa1d7e0e042c174ec6bf8baf173c0",
+      "version": "0.1.2",
+      "hash": "1ca7dfe3839c4511f8bfddf023d046fb556d451b921fd0d42cf491aa047a45ad",
       "path": "crates/smartfs-cli"
     },
     "smartfs-compress": {
@@ -18,13 +18,13 @@
       "path": "crates/smartfs-compress"
     },
     "smartfs-daemon": {
-      "version": "0.1.7",
-      "hash": "c6087fc5c760dc4784dd87e98083d3bfc92dda82a7b4152ae56167e44d5a6812",
+      "version": "0.1.8",
+      "hash": "a34543c6755bd05cde521a160663fe2ad2dd247a678a2ccf0f30ece7ce2bc27e",
       "path": "crates/smartfs-daemon"
     },
     "smartfs-db": {
-      "version": "0.1.4",
-      "hash": "0fab8146036f23a64f84fa9c26a240e0485939a7ddafbcaadeabf5cb0d4d6d56",
+      "version": "0.1.5",
+      "hash": "2bb168356131b69bbe291743708e3855f82a7908ed3207ea6c63224f9f07bb38",
       "path": "crates/smartfs-db"
     },
     "smartfs-docgen": {
@@ -33,8 +33,8 @@
       "path": "crates/smartfs-docgen"
     },
     "smartfs-fuse": {
-      "version": "0.1.11",
-      "hash": "1699ee814d7c4b887742546995c7747accdc41684d2b405efdd4e7980e87a068",
+      "version": "0.1.12",
+      "hash": "9efb55ba86fa51a5e208c5bd66b2e9e3895949d80747fe0339c8b985f48df789",
       "path": "crates/smartfs-fuse"
     },
     "smartfs-ipfs": {
@@ -48,8 +48,8 @@
       "path": "crates/smartfs-mcp"
     },
     "smartfs-schema": {
-      "version": "0.1.2",
-      "hash": "63806fd3427ce5b5a5c3041f935e44ac20f73993249758498a4ed8cd339b1b88",
+      "version": "0.1.3",
+      "hash": "adb4063a764b8126c4a3dc5afba40ff814286006fbb2947d5c67ed78de9536bf",
       "path": "crates/smartfs-schema"
     },
     "smartfs-semantic": {
@@ -58,8 +58,8 @@
       "path": "crates/smartfs-semantic"
     },
     "smartfs-store": {
-      "version": "0.1.4",
-      "hash": "44358f3e518e20448d44a31ff0121cb8edce0806ca2c1557b71f30df47db9999",
+      "version": "0.1.5",
+      "hash": "4ea3e66cddcfc77ec645ba12f39de3d98846b9e18b80e148bdc3dd9c8c9f2bb7",
       "path": "crates/smartfs-store"
     }
   }

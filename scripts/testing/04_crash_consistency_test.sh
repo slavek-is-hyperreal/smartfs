@@ -402,8 +402,23 @@ if [[ -n "$PG_CONTAINER" ]] && command -v docker >/dev/null 2>&1; then
   wait "$HAMMER" 2>/dev/null || true
   stop_daemon
   docker start "$PG_CONTAINER" >/dev/null 2>&1 || die "could not restart Postgres container ${PG_CONTAINER}"
-  sleep 5
-  require_db "$CRASH_URL"
+
+  # K12 kills Postgres mid-transaction on purpose, so it comes back up in crash
+  # recovery and refuses connections until it reaches a consistent state. A
+  # fixed `sleep 5` is a guess at how long that takes, and it was wrong: the
+  # stage aborted here on "the database system is not yet accepting connections"
+  # after only three rounds, every time. Wait for readiness instead of guessing
+  # at it — and keep failing loudly if it never arrives, because a Postgres that
+  # cannot recover is a real result.
+  K12_WAITED=0
+  until psql "$CRASH_URL" -qtAX -c 'SELECT 1' >/dev/null 2>&1; do
+    (( K12_WAITED == 0 )) && info "waiting for Postgres to finish crash recovery after K12"
+    sleep 2; K12_WAITED=$((K12_WAITED + 2))
+    (( K12_WAITED >= 180 )) && die "Postgres did not finish recovering within 180s after K12.
+       The database was killed deliberately; not coming back is a FAILURE of this
+       stage, not a reason to continue without it."
+  done
+  pass "Postgres recovered ${K12_WAITED}s after being killed mid-transaction"
 
   start_daemon "$CRASH_MOUNT" "$CRASH_STORE" "$CRASH_URL" --no-semantic
   snapshot_blobs "${RD}/blobs-after.sha256"
