@@ -384,7 +384,38 @@ pseudocode, which supersedes §11.1 KROK 1 and §12.1), plus FIX-02's worker bou
 | `P3` | after the `rename()`, before the caller is acknowledged | the marker is durable. POSIX permits the write to be lost from the caller's view here, but SmartFS will recover it anyway: assert that after restart the write **is** committed, exactly once, and that the file reads as the new version |
 | `P4` | after acknowledgement, before the drain picks the marker up | **the write must survive.** The caller was told it succeeded. Assert restart commits it exactly once, `content_hash` correct, file reads as the new version, and the marker is gone from `queue/` afterwards |
 
-**KROK 1 — outside any transaction**
+> **Revised again 2026-09-14 for [ADR-62 phase C](../adr/ADR-62-per-inode-dedup-and-lazy-reclaim.md).**
+> Phase C moved dedup off the write path, which inverts `insert_blob` and
+> `store.put` — the exact ordering K1-K4 were built around. Those four points
+> describe a sequence the code no longer executes, and a crash point that cannot
+> fire is not coverage, it is a gap wearing coverage's clothes.
+>
+> What the write path does now: hash → compress → `store.put` under a
+> *provisional* id → marker `rename()` → acknowledge. No database write at all.
+> The drain then runs dedup and the version commit in one transaction and
+> reconciles the provisional blob.
+>
+> **The crash surface shrank, and that is the point.** The old order created a
+> `blobs` row before the bytes existed, so a crash left a row pointing at
+> nothing — FIX-04's "poisoned row", which needed a compensating DELETE and
+> FIX-03's existence check to heal. The new order creates the bytes first, so a
+> crash leaves an orphan *file* with no row: invisible through the mount by
+> Invariant #3, and reclaimed by ADR-62's cleaner. There is no poisoned state to
+> compensate for, because the state that needed compensating cannot occur.
+>
+> | was | now |
+> |---|---|
+> | `K1` after hash, before `INSERT INTO blobs` | **gone** — no insert here. Covered by `P1` |
+> | `K2` after insert, before `store.put` (the poisoned row) | **gone** — this order is inverted. The state is unreachable |
+> | `K3` after `store.put`, before `UPDATE compressed_size` | **gone** — the size is known before the row exists and is written with it |
+> | `K4` in the `Err` branch, after the compensating `DELETE` | **gone** — nothing to compensate |
+> | `K5` end of KROK 1, before `BEGIN` | now `P1`/`P2` below |
+>
+> They are struck rather than deleted so the record shows what the design used
+> to be and why it changed. **New points the drain needs — `D1` and `D2` — are
+> listed after KROK 2.**
+
+**KROK 1 — outside any transaction (K1-K4 no longer reachable, see above)**
 
 | Label | Kill point | What must be true after restart |
 |---|---|---|
@@ -407,6 +438,13 @@ pseudocode, which supersedes §11.1 KROK 1 and §12.1), plus FIX-02's worker bou
 | `K7` | after `INSERT INTO file_versions`, before `INSERT INTO ast_nodes` | full rollback, no half-version; then replay commits it exactly once, with its AST nodes |
 | `K8` | after `INSERT INTO ast_nodes`, before `UPDATE inode_registry` | full rollback, `inode_registry.current_blob_id` still on the previous blob; then replay moves it to the new one |
 | `K9` | after `UPDATE inode_registry`, immediately before `COMMIT` | full rollback — still the highest-value point, since any surviving row means the "short transaction, SQL only, zero I/O" property of KROK 2 is not real. Then replay commits it exactly once |
+
+**KROK 2b — the drain's own transaction (NEW with ADR-62 phase C)**
+
+| Label | Kill point | What must be true after restart |
+|---|---|---|
+| `D1` | after `insert_blob` inside the drain transaction, before `cow_commit` in the same transaction | full rollback of **both**: no `blobs` row, no `file_versions` row. The marker survives, so replay must then commit the write exactly once. A surviving `blobs` row here would mean the two statements are not actually one transaction, which is the whole point of phase C |
+| `D2` | after the drain's `COMMIT`, before the provisional blob is reconciled | the version is committed and correct. A *duplicate* write leaves its redundant provisional blob on disk: assert it is unreferenced, therefore invisible (Invariant #3), and reclaimed by the cleaner rather than leaking. This is the deferred-dedup cost made observable |
 
 **Post-commit and concurrency**
 
