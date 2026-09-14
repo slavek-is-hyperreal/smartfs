@@ -210,6 +210,7 @@ async fn run(args: DaemonArgs) -> std::result::Result<(), Fatal> {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         &store_path,
+        Arc::clone(&store),
         &tokio::runtime::Handle::current(),
         limits,
     )

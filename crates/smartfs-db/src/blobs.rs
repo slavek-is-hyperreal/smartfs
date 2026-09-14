@@ -262,3 +262,67 @@ pub async fn private_blob_of_inode(pool: &PgPool, inode_id: Uuid) -> Result<Opti
     .await
     .map_err(|e| SmartFsError::Db(format!("private_blob_of_inode error: {e}")))
 }
+
+/// @id: 2e6b95c0-4f83-41a7-9d2e-63c8071fa5b9
+/// `insert_blob_with_sharing` inside a caller-owned transaction, carrying the
+/// compressed size (ADR-62 phase C).
+///
+/// Phase C moves dedup off the write path and into the drain, where it shares a
+/// transaction with the version commit — two autocommits were two WAL flushes,
+/// and a flush measures 27ms on this deployment.
+///
+/// `compressed_size` is supplied rather than patched in afterwards: the bytes
+/// are compressed before the blob is written now, so the size is known by the
+/// time the row is created and the separate `UPDATE` disappears.
+///
+/// Returns the *canonical* blob id. On a dedup hit that is the pre-existing
+/// blob, not the one the caller just wrote — the caller is then responsible for
+/// discarding its provisional copy.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_blob_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    content_hash: &str,
+    blob_id: Uuid,
+    backend_id: Option<Uuid>,
+    size: i64,
+    compressed_size: Option<i64>,
+    shared: bool,
+) -> Result<BlobInsertResult> {
+    let sql = if shared {
+        r#"
+        INSERT INTO blobs (content_hash, blob_id, backend_id, size, compressed_size, shared)
+        VALUES ($1, $2, $3, $4, $5, TRUE)
+        ON CONFLICT (content_hash) WHERE shared DO UPDATE
+            SET content_hash = blobs.content_hash
+        RETURNING blob_id, (xmax = 0) AS inserted
+        "#
+    } else {
+        r#"
+        INSERT INTO blobs (content_hash, blob_id, backend_id, size, compressed_size, shared)
+        VALUES ($1, $2, $3, $4, $5, FALSE)
+        RETURNING blob_id, TRUE AS inserted
+        "#
+    };
+
+    let row = sqlx::query(sql)
+        .bind(content_hash)
+        .bind(blob_id)
+        .bind(backend_id)
+        .bind(size)
+        .bind(compressed_size)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| SmartFsError::Db(format!("insert_blob_tx error: {e}")))?;
+
+    let returned_blob_id: Uuid = row
+        .try_get("blob_id")
+        .map_err(|e| SmartFsError::Db(format!("insert_blob_tx extract blob_id: {e}")))?;
+    let inserted: bool = row
+        .try_get("inserted")
+        .map_err(|e| SmartFsError::Db(format!("insert_blob_tx extract inserted: {e}")))?;
+
+    Ok(BlobInsertResult {
+        blob_id: returned_blob_id,
+        inserted,
+    })
+}

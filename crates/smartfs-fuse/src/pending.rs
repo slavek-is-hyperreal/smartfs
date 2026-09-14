@@ -30,7 +30,7 @@ use std::time::Duration;
 use smartfs_db::PgPool;
 use smartfs_schema::error::{Result, SmartFsError};
 use smartfs_schema::PendingMarker;
-use smartfs_store::PendingQueue;
+use smartfs_store::{BlobStore, PendingQueue};
 use uuid::Uuid;
 use tokio::sync::{mpsc, Notify};
 
@@ -270,9 +270,16 @@ impl Gate {
 /// Producer side of the pipeline, held by the FUSE filesystem.
 ///
 /// Cheap to clone; every clone addresses the same queue and the same drain.
-#[derive(Debug, Clone)]
+///
+/// No `Debug`: `dyn BlobStore` has none, and a derived one would print nothing
+/// useful about a trait object anyway.
+#[derive(Clone)]
 pub struct PendingPipeline {
     queue: PendingQueue,
+    /// Needed by the drain to reconcile the provisional blob a write left
+    /// behind: on a dedup hit it is redundant and gets deleted, and if the
+    /// canonical bytes are missing it is what heals them (ADR-62 phase C).
+    store: Arc<dyn BlobStore + Send + Sync>,
     tx: mpsc::UnboundedSender<String>,
     seq: Arc<AtomicU64>,
     gate: Arc<Gate>,
@@ -299,6 +306,7 @@ impl PendingPipeline {
     pub async fn start(
         pool: PgPool,
         store_root: impl AsRef<Path>,
+        store: Arc<dyn BlobStore + Send + Sync>,
         rt: &tokio::runtime::Handle,
         limits: PendingLimits,
     ) -> Result<Self> {
@@ -329,10 +337,12 @@ impl PendingPipeline {
         let drain_gate = Arc::clone(&gate);
         let drain_inflight = Arc::clone(&inflight);
         let drain_overlay = Arc::clone(&overlay);
+        let drain_store = Arc::clone(&store);
         rt.spawn(async move {
             drain_loop(
                 pool,
                 drain_queue,
+                drain_store,
                 drain_gate,
                 drain_inflight,
                 drain_overlay,
@@ -343,6 +353,7 @@ impl PendingPipeline {
 
         let pipeline = Self {
             queue,
+            store,
             tx,
             seq: Arc::new(AtomicU64::new(highest + 1)),
             gate,
@@ -471,6 +482,12 @@ impl PendingPipeline {
         Ok(())
     }
 
+    /// @id: d38f0a52-6c71-4e94-b5a3-0197fe28cd46
+    /// The blob store this pipeline drains against.
+    pub fn store(&self) -> &Arc<dyn BlobStore + Send + Sync> {
+        &self.store
+    }
+
     /// @id: fe5886be-9f14-4b15-b473-495b13742fbe
     /// The newest uncommitted write for `inode_id`, if there is one.
     ///
@@ -589,9 +606,11 @@ impl PendingPipeline {
 /// One task, one marker at a time, in FIFO order. Sequential is not an
 /// oversight: it is what keeps `version_number`, computed as `MAX+1` inside
 /// each transaction, following write order.
+#[allow(clippy::too_many_arguments)]
 async fn drain_loop(
     pool: PgPool,
     queue: PendingQueue,
+    store: Arc<dyn BlobStore + Send + Sync>,
     gate: Arc<Gate>,
     inflight: Arc<Mutex<HashSet<String>>>,
     overlay: Arc<PendingOverlay>,
@@ -607,7 +626,7 @@ async fn drain_loop(
             .flatten()
             .map(|m| m.inode_id);
 
-        let outcome = commit_one(&pool, &queue, &file_name).await;
+        let outcome = commit_one(&pool, &queue, Some(store.as_ref()), &file_name).await;
 
         // Clear before acting on the result: a marker whose commit failed must
         // become visible to the next scan, or it would never be retried.

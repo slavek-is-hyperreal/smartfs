@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T21:26:20.868072696Z",
+  "generated_at": "2026-09-14T06:22:06.376041527Z",
   "generator_version": "0.1.0",
   "symbols": [
     {
@@ -1053,7 +1053,7 @@
       "kind": "Struct",
       "name": "ReplayReport",
       "last_known_file": "crates/smartfs-db/src/replay.rs",
-      "last_known_line": 19,
+      "last_known_line": 20,
       "doc_summary": "Outcome of replaying a whole queue.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1086,7 +1086,7 @@
       "kind": "Function",
       "name": "commit_pending_marker",
       "last_known_file": "crates/smartfs-db/src/replay.rs",
-      "last_known_line": 42,
+      "last_known_line": 43,
       "doc_summary": "Commits one pending marker and checkpoints it by unlinking.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1136,6 +1136,17 @@
       "tombstoned_reason": null
     },
     {
+      "id": "6d0f8b41-72ae-4c95-bf13-08e5a7d2c604",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "cow_commit_tx",
+      "last_known_file": "crates/smartfs-db/src/versions.rs",
+      "last_known_line": 128,
+      "doc_summary": "The body of `cow_commit`, run inside a transaction the caller owns.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "e1e11328-26b4-49fa-b77f-887032d37f43",
       "crate_name": "smartfs-db",
       "kind": "Function",
@@ -1174,7 +1185,7 @@
       "kind": "Function",
       "name": "get_ast_nodes",
       "last_known_file": "crates/smartfs-db/src/versions.rs",
-      "last_known_line": 357,
+      "last_known_line": 383,
       "doc_summary": "Get all AST nodes associated with a file version.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1389,6 +1400,17 @@
       "tombstoned_reason": null
     },
     {
+      "id": "2e6b95c0-4f83-41a7-9d2e-63c8071fa5b9",
+      "crate_name": "smartfs-db",
+      "kind": "Function",
+      "name": "insert_blob_tx",
+      "last_known_file": "crates/smartfs-db/src/blobs.rs",
+      "last_known_line": 282,
+      "doc_summary": "`insert_blob_with_sharing` inside a caller-owned transaction, carrying the",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
       "id": "5f2a7c81-93e4-4b60-a7d8-1c05e3f9b247",
       "crate_name": "smartfs-db",
       "kind": "Function",
@@ -1548,7 +1570,7 @@
       "kind": "Function",
       "name": "replay_pending_queue",
       "last_known_file": "crates/smartfs-db/src/replay.rs",
-      "last_known_line": 98,
+      "last_known_line": 157,
       "doc_summary": "Replays every marker currently in the queue, in FIFO order.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1625,7 +1647,7 @@
       "kind": "Function",
       "name": "version_find_by_hash",
       "last_known_file": "crates/smartfs-db/src/versions.rs",
-      "last_known_line": 333,
+      "last_known_line": 359,
       "doc_summary": "Find an existing file version by its content hash.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1636,7 +1658,7 @@
       "kind": "Function",
       "name": "version_get",
       "last_known_file": "crates/smartfs-db/src/versions.rs",
-      "last_known_line": 246,
+      "last_known_line": 272,
       "doc_summary": "Get a specific version of a file or its latest version if version_number is None.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1647,7 +1669,7 @@
       "kind": "Function",
       "name": "version_get_by_id",
       "last_known_file": "crates/smartfs-db/src/versions.rs",
-      "last_known_line": 288,
+      "last_known_line": 314,
       "doc_summary": "Get a file version by its primary key UUID.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -1658,7 +1680,7 @@
       "kind": "Function",
       "name": "version_history",
       "last_known_file": "crates/smartfs-db/src/versions.rs",
-      "last_known_line": 310,
+      "last_known_line": 336,
       "doc_summary": "List all historical versions for an inode ordered by version number ascending.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2010,7 +2032,7 @@
       "kind": "Struct",
       "name": "PendingPipeline",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 274,
+      "last_known_line": 277,
       "doc_summary": "Producer side of the pipeline, held by the FUSE filesystem.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2021,7 +2043,7 @@
       "kind": "ImplBlock",
       "name": "PendingPipeline",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 290,
+      "last_known_line": 297,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2252,7 +2274,7 @@
       "kind": "Function",
       "name": "limits",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 402,
+      "last_known_line": 413,
       "doc_summary": "Bounds this pipeline was started with.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2318,7 +2340,7 @@
       "kind": "Function",
       "name": "next_seq",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 408,
+      "last_known_line": 419,
       "doc_summary": "Takes the next FIFO sequence number.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2340,7 +2362,7 @@
       "kind": "Function",
       "name": "overlay_depth",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 486,
+      "last_known_line": 503,
       "doc_summary": "Inodes currently shadowed by an uncommitted write.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2362,7 +2384,7 @@
       "kind": "Function",
       "name": "queue",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 396,
+      "last_known_line": 407,
       "doc_summary": "The queue directory, for the scan and for status reporting.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2373,7 +2395,7 @@
       "kind": "Function",
       "name": "quiesce",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 574,
+      "last_known_line": 591,
       "doc_summary": "Waits until the RAM queue is empty, or `timeout` elapses.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2384,7 +2406,7 @@
       "kind": "Function",
       "name": "ram_depth",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 415,
+      "last_known_line": 426,
       "doc_summary": "Writes accepted but not yet checkpointed. This is what the limit bounds",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2406,7 +2428,7 @@
       "kind": "Function",
       "name": "rescan",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 534,
+      "last_known_line": 551,
       "doc_summary": "Decision point 4: rescans `pending/queue/` and hands the drain anything",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2439,7 +2461,7 @@
       "kind": "Function",
       "name": "start",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 299,
+      "last_known_line": 306,
       "doc_summary": "Starts the pipeline: binds the queue directory, seeds the sequence",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2452,6 +2474,17 @@
       "last_known_file": "crates/smartfs-fuse/src/fs.rs",
       "last_known_line": 140,
       "doc_summary": "Returns a reference to the shared `FuseStateManager`.",
+      "tombstoned": false,
+      "tombstoned_reason": null
+    },
+    {
+      "id": "d38f0a52-6c71-4e94-b5a3-0197fe28cd46",
+      "crate_name": "smartfs-fuse",
+      "kind": "Function",
+      "name": "store",
+      "last_known_file": "crates/smartfs-fuse/src/pending.rs",
+      "last_known_line": 487,
+      "doc_summary": "The blob store this pipeline drains against.",
       "tombstoned": false,
       "tombstoned_reason": null
     },
@@ -2472,7 +2505,7 @@
       "kind": "Function",
       "name": "submit",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 428,
+      "last_known_line": 439,
       "doc_summary": "Stage 1 of the commit: make the write durable, then hand it to the drain.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -2582,7 +2615,7 @@
       "kind": "Function",
       "name": "view_of",
       "last_known_file": "crates/smartfs-fuse/src/pending.rs",
-      "last_known_line": 480,
+      "last_known_line": 497,
       "doc_summary": "The newest uncommitted write for `inode_id`, if there is one.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -3561,7 +3594,7 @@
       "kind": "ImplBlock",
       "name": "PendingMarker",
       "last_known_file": "crates/smartfs-schema/src/pending.rs",
-      "last_known_line": 95,
+      "last_known_line": 108,
       "doc_summary": null,
       "tombstoned": false,
       "tombstoned_reason": null
@@ -3627,7 +3660,7 @@
       "kind": "Function",
       "name": "file_name",
       "last_known_file": "crates/smartfs-schema/src/pending.rs",
-      "last_known_line": 101,
+      "last_known_line": 114,
       "doc_summary": "Filename this marker is stored under: `<seq>_<content_hash>.json`.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -3638,7 +3671,7 @@
       "kind": "Function",
       "name": "file_name_for",
       "last_known_file": "crates/smartfs-schema/src/pending.rs",
-      "last_known_line": 107,
+      "last_known_line": 120,
       "doc_summary": "Builds a marker filename without needing the marker itself.",
       "tombstoned": false,
       "tombstoned_reason": null
@@ -3649,7 +3682,7 @@
       "kind": "Function",
       "name": "parse_file_name",
       "last_known_file": "crates/smartfs-schema/src/pending.rs",
-      "last_known_line": 116,
+      "last_known_line": 129,
       "doc_summary": "Parses `<seq>_<content_hash>.json` back into its two parts.",
       "tombstoned": false,
       "tombstoned_reason": null

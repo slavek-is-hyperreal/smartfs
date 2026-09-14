@@ -421,6 +421,7 @@ impl Filesystem for SmartFsFuse {
                         size: new_size as i64,
                         compressed_size,
                         external_path: None,
+                        shared: true,
                         mode: mode.map(|m| m & 0o7777).unwrap_or(record.mode as u32),
                         uid: uid.unwrap_or(record.uid as u32),
                         gid: gid.unwrap_or(record.gid as u32),
@@ -862,100 +863,67 @@ impl Filesystem for SmartFsFuse {
                         let hash = smartfs_compress::hash_bytes(&data).0;
                         let size = data.len() as i64;
                         let new_blob_uuid = Uuid::new_v4();
-                        let backend_id = record.backend_id;
                         let compression_level = record.compression_level as i32;
 
-                        // Step 1: Outside transaction
                         let t_hash = t_start.elapsed();
-                        // ADR-62: the inode's policy decides whether this blob
-                        // joins the dedup index. A private blob keeps its
-                        // inventory row but stays out of the partial unique
-                        // index, so nothing else can ever come to depend on it
-                        // — which is what lets unlink free it immediately.
-                        let insert_result = smartfs_db::insert_blob_with_sharing(
-                            &pool,
-                            &hash,
-                            new_blob_uuid,
-                            backend_id,
-                            size,
-                            record.dedup_enabled,
-                        )
-                        .await?;
-                        let blob_id = insert_result.blob_id;
+
+                        // ADR-62 phase C: no database on the write path.
+                        //
+                        // Dedup used to run here, as one autocommitted INSERT,
+                        // and the phase breakdown put it at 43ms — 58% of
+                        // close() — all of it WAL fsync wait. It now happens in
+                        // the drain, sharing a transaction with the version
+                        // commit. The bytes go to a provisional id because
+                        // whether identical content already exists is not known
+                        // yet; the drain decides and either keeps this blob or
+                        // discards it.
+                        //
+                        // This inverts insert_blob and store.put, which is what
+                        // FIX-03 and FIX-04 rested on. The crash states get
+                        // simpler rather than harder: a crash before the marker
+                        // lands leaves an orphan file with no row — invisible
+                        // through the mount (Invariant #3) and reclaimed by the
+                        // ADR-62 cleaner — where the old order left a row
+                        // pointing at bytes that were never written.
+                        let compressed =
+                            match smartfs_compress::compress(&data, compression_level) {
+                                Ok(c) => c,
+                                Err(e) => return Err(e),
+                            };
+                        let compressed_size = Some(compressed.len() as i64);
+                        let blob_id = new_blob_uuid;
+                        store.put(blob_id, &compressed).await?;
                         let t_dedup = t_start.elapsed();
+                        let t_blob = t_start.elapsed();
 
-                        let mut compressed_size = None;
-                        if insert_result.inserted {
-                            let compressed =
-                                match smartfs_compress::compress(&data, compression_level) {
-                                    Ok(c) => c,
-                                    Err(e) => {
-                                        let _ = smartfs_db::compensate_blob_delete(&pool, &hash)
-                                            .await;
-                                        return Err(e);
-                                    }
-                                };
-
-                            match store.put(blob_id, &compressed).await {
-                                Ok(()) => {
-                                    let c_size = compressed.len() as i64;
-                                    compressed_size = Some(c_size);
-                                    let _ = smartfs_db::update_blob_compressed_size(
-                                        &pool, &hash, c_size,
-                                    )
-                                    .await;
-                                }
-                                Err(e) => {
-                                    // FIX-04: Compensate delete on store.put failure
-                                    let _ = smartfs_db::compensate_blob_delete(&pool, &hash)
-                                        .await;
-                                    return Err(e);
-                                }
-                            }
-                        } else {
-                            // FIX-03 healing: verify physical existence
-                            if let Ok(exists) = store.exists(blob_id).await {
-                                if !exists {
-                                    if let Ok(compressed) =
-                                        smartfs_compress::compress(&data, compression_level)
-                                    {
-                                        let _ = store.put(blob_id, &compressed).await;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Step 2 (ADR-58): no longer the Postgres transaction.
-                        // Publish a durable pending marker and hand it to the
-                        // drain. The blob above is already on disk, so once the
-                        // marker's rename() lands the write survives a crash
-                        // even though nothing has touched file_versions yet.
                         let marker = smartfs_schema::PendingMarker {
                             seq,
                             inode_id,
                             parent_inode: record.parent_id,
                             name: record.name.clone(),
-                            // Idempotency key for replay: the drain inserts
-                            // with ON CONFLICT (id) DO NOTHING, so a marker
-                            // that survived its own COMMIT replays as a no-op.
+                            // Idempotency key for replay: the drain inserts with
+                            // ON CONFLICT (id) DO NOTHING, so a marker that
+                            // survived its own COMMIT replays as a no-op.
                             version_id: Uuid::new_v4(),
                             content_hash: hash.clone(),
                             blob_id: Some(blob_id),
                             size,
                             compressed_size,
                             external_path: None,
+                            // ADR-62: the inode's policy travels with the write,
+                            // so the drain need not re-read the inode to learn
+                            // whether this blob may join the dedup index.
+                            shared: record.dedup_enabled,
                             mode: record.mode as u32,
                             uid: record.uid as u32,
                             gid: record.gid as u32,
                             special_type: Some("generic".to_string()),
                             special_data: None,
-                            ast_nodes: serde_json::to_value(&ast_nodes).unwrap_or_else(
-                                |_| serde_json::Value::Array(Vec::new()),
-                            ),
+                            ast_nodes: serde_json::to_value(&ast_nodes)
+                                .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
                             created_at: chrono::Utc::now().to_rfc3339(),
                         };
 
-                        let t_blob = t_start.elapsed();
                         pending.submit(&marker).await?;
                         let t_total = t_start.elapsed();
 
@@ -1494,6 +1462,7 @@ impl Filesystem for SmartFsFuse {
                 size,
                 compressed_size,
                 external_path: None,
+                shared: true,
                 mode: created.mode as u32,
                 uid: created.uid as u32,
                 gid: created.gid as u32,

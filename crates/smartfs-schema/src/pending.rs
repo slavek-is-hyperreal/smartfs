@@ -60,9 +60,16 @@ pub struct PendingMarker {
     /// Plaintext byte length.
     pub size: i64,
 
-    /// Compressed byte length, `None` when the blob was already deduplicated
-    /// or the compressed size was not recorded before the crash.
+    /// Compressed byte length. Known before the blob is written under ADR-62
+    /// phase C, so the drain can record it when it creates the row instead of
+    /// patching it in afterwards.
     pub compressed_size: Option<i64>,
+
+    /// Whether this blob joins the dedup index (ADR-62). Carried on the marker
+    /// because the decision belongs to the inode's policy at write time, and
+    /// the drain must not have to re-read the inode to learn it.
+    #[serde(default = "default_shared")]
+    pub shared: bool,
 
     /// Set instead of `blob_id` for content that lives outside the blob store.
     pub external_path: Option<String>,
@@ -89,6 +96,12 @@ pub struct PendingMarker {
 
     /// RFC 3339 timestamp of the pending stage, for queue-age reporting.
     pub created_at: String,
+}
+
+/// Markers written before ADR-62 carry no `shared` field; they predate the
+/// per-inode switch, when every blob was shared.
+fn default_shared() -> bool {
+    true
 }
 
 /// @id: 569d7df3-825f-4600-972b-8080e71fb3ac
@@ -138,6 +151,7 @@ mod tests {
             blob_id: Some(Uuid::new_v4()),
             size: 3,
             compressed_size: Some(3),
+            shared: true,
             external_path: None,
             mode: 0o100644,
             uid: 0,

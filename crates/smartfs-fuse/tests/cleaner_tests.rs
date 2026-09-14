@@ -93,6 +93,7 @@ async fn a_blob_named_by_a_pending_marker_is_never_touched() {
         blob_id: Some(blob_id),
         size: 4,
         compressed_size: None,
+        shared: true,
         external_path: None,
         mode: 0o100644,
         uid: 0,

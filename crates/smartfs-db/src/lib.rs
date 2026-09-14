@@ -18,7 +18,7 @@ pub mod worker;
 
 pub use blobs::{
     compensate_blob_delete, dedup_check, delete_blob_if_unreferenced, get_blob, insert_blob,
-    insert_blob_with_sharing, list_blob_digests, list_unreferenced_blobs, private_blob_of_inode,
+    insert_blob_tx, insert_blob_with_sharing, list_blob_digests, list_unreferenced_blobs, private_blob_of_inode,
     update_blob_compressed_size,
 };
 pub use embeddings::{
@@ -38,7 +38,7 @@ pub use preflight::{column_exists, ping, table_exists};
 pub use replay::{commit_pending_marker, replay_pending_queue, ReplayReport};
 pub use search::{count_all_unconsolidated, search_fulltext_bm25, set_search_text};
 pub use versions::{
-    cow_commit, cow_commit_with_id, get_ast_nodes, version_find_by_hash, version_get,
+    cow_commit, cow_commit_tx, cow_commit_with_id, get_ast_nodes, version_find_by_hash, version_get,
     version_get_by_id, version_history, CowCommitOutcome,
 };
 pub use worker::{

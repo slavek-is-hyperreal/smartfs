@@ -85,35 +85,65 @@ pub async fn cow_commit_with_id(
     special_data: Option<serde_json::Value>,
     ast_nodes: &[AstNodeInsert],
 ) -> Result<CowCommitOutcome> {
-    // Fast path for replay: if this version already landed, do nothing at all.
-    // Re-running the inode_registry update would be wrong here, because a newer
-    // version may have been committed in the meantime.
-    if let Some(existing) = sqlx::query_scalar::<_, i32>(
-        "SELECT version_number FROM file_versions WHERE id = $1",
-    )
-    .bind(version_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| SmartFsError::Db(format!("cow_commit replay probe: {e}")))?
-    {
-        return Ok(CowCommitOutcome {
-            version_id,
-            version_number: existing,
-            inserted: false,
-        });
-    }
-
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| SmartFsError::Db(format!("cow_commit begin tx: {e}")))?;
 
+    let outcome = cow_commit_tx(
+        &mut tx,
+        version_id,
+        inode_id,
+        blob_id,
+        content_hash,
+        size,
+        compressed_size,
+        external_path,
+        special_type,
+        special_data,
+        ast_nodes,
+    )
+    .await?;
+
+    if !outcome.inserted {
+        let _ = tx.rollback().await;
+        return Ok(outcome);
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| SmartFsError::Db(format!("cow_commit commit tx: {e}")))?;
+
+    Ok(outcome)
+}
+
+/// @id: 6d0f8b41-72ae-4c95-bf13-08e5a7d2c604
+/// The body of `cow_commit`, run inside a transaction the caller owns.
+///
+/// Exists so the drain can put dedup and the version commit in ONE transaction
+/// (ADR-62 phase C). Two autocommits cost two WAL flushes, and a WAL flush on
+/// this deployment measures 27ms; halving them halves the drain's cost per
+/// write. Neither commits nor rolls back — that stays with whoever opened it.
+#[allow(clippy::too_many_arguments)]
+pub async fn cow_commit_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    version_id: Uuid,
+    inode_id: Uuid,
+    blob_id: Option<Uuid>,
+    content_hash: &str,
+    size: i64,
+    compressed_size: Option<i64>,
+    external_path: Option<&str>,
+    special_type: Option<&str>,
+    special_data: Option<serde_json::Value>,
+    ast_nodes: &[AstNodeInsert],
+) -> Result<CowCommitOutcome> {
     // 1. Lock inode to serialize version increment
     let locked_inode: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM inode_registry WHERE id = $1 FOR UPDATE",
     )
     .bind(inode_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit lock inode: {e}")))?;
 
@@ -132,7 +162,7 @@ pub async fn cow_commit_with_id(
         "SELECT COALESCE(MAX(version_number), 0) + 1 FROM file_versions WHERE inode_id = $1",
     )
     .bind(inode_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit version calc: {e}")))?;
 
@@ -141,7 +171,7 @@ pub async fn cow_commit_with_id(
         "SELECT id FROM file_versions WHERE inode_id = $1 ORDER BY version_number DESC LIMIT 1",
     )
     .bind(inode_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit prev version lookup: {e}")))?;
 
@@ -171,14 +201,14 @@ pub async fn cow_commit_with_id(
     .bind(stype)
     .bind(sdata)
     .bind(prev_ver)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit insert file_version: {e}")))?;
 
     if inserted.rows_affected() == 0 {
-        // Lost the race to a concurrent replay of the same marker. Roll back
-        // rather than layering a second set of AST nodes onto someone else's row.
-        let _ = tx.rollback().await;
+        // Lost the race to a concurrent replay of the same marker. Report it and
+        // let the caller roll back — layering a second set of AST nodes onto
+        // someone else's row would be worse than doing nothing.
         return Ok(CowCommitOutcome {
             version_id,
             version_number: next_ver,
@@ -206,7 +236,7 @@ pub async fn cow_commit_with_id(
         .bind(node.end_line)
         .bind(&node.source)
         .bind(&node.content_hash)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| SmartFsError::Db(format!("cow_commit insert ast_node: {e}")))?;
     }
@@ -222,17 +252,13 @@ pub async fn cow_commit_with_id(
     .bind(blob_id)
     .bind(size)
     .bind(inode_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|e| SmartFsError::Db(format!("cow_commit update inode: {e}")))?;
 
     // ADR-61: a content change moves mtime, and updated_at (POSIX ctime) with
     // it. atime is deliberately untouched — writing is not reading.
     // NOTE: is_current is NEVER touched in cow_commit (FIX-02).
-
-    tx.commit()
-        .await
-        .map_err(|e| SmartFsError::Db(format!("cow_commit commit tx: {e}")))?;
 
     Ok(CowCommitOutcome {
         version_id,

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use smartfs_db::{PgPool, ReplayReport};
 use smartfs_schema::error::Result;
-use smartfs_store::PendingQueue;
+use smartfs_store::{LocalDiskStore, PendingQueue};
 
 use crate::args::RecoverArgs;
 
@@ -48,7 +48,11 @@ pub async fn handle_recover(
         });
     }
 
-    let report = smartfs_db::replay_pending_queue(pool, &queue).await?;
+    // Hand the store through so replay can reconcile provisional blobs: on a
+    // dedup hit the redundant copy is removed, and a canonical blob whose bytes
+    // are missing is healed from it (ADR-62 phase C).
+    let store = LocalDiskStore::new(store_path);
+    let report = smartfs_db::replay_pending_queue(pool, &queue, Some(&store)).await?;
 
     // Staging files can only be left by a crash between create and rename, so
     // reclaiming the old ones here costs nothing and never touches a durable

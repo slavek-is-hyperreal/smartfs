@@ -26,6 +26,7 @@ use std::time::Duration;
 use smartfs_db::PgPool;
 use smartfs_fuse::{PendingLimits, PendingPipeline};
 use smartfs_schema::PendingMarker;
+use smartfs_store::{BlobStore, LocalDiskStore};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -82,6 +83,7 @@ fn marker(seq: u64, inode_id: Uuid, content: &str) -> PendingMarker {
         blob_id: Some(Uuid::new_v4()),
         size: content.len() as i64,
         compressed_size: None,
+        shared: true,
         external_path: None,
         mode: 0o100644,
         uid: 0,
@@ -130,6 +132,7 @@ async fn submitted_markers_reach_postgres_in_write_order() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -181,6 +184,7 @@ async fn submit_is_durable_before_the_drain_runs() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -213,6 +217,7 @@ async fn replaying_a_committed_marker_is_a_no_op() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -225,7 +230,7 @@ async fn replaying_a_committed_marker_is_a_no_op() {
 
     // Put the marker back, as a crash would have left it, and replay.
     pipeline.queue().enqueue(&m).await.expect("re-enqueue failed");
-    let inserted = smartfs_fuse::commit_one(&pool, pipeline.queue(), &m.file_name())
+    let inserted = smartfs_fuse::commit_one(&pool, pipeline.queue(), None, &m.file_name())
         .await
         .expect("replay failed");
 
@@ -253,16 +258,23 @@ async fn replaying_a_committed_marker_is_a_no_op() {
 async fn a_full_queue_refuses_with_pending_queue_full() {
     // Decision point 6: back-pressure, never a silent drop.
     //
-    // The drain here cannot make progress — the inode does not exist, so every
-    // transaction fails the foreign key. This is the case a channel-based bound
-    // gets wrong: it would free a slot on each error and let writes be accepted
-    // forever while nothing commits. The gate holds the slot instead.
-    let pool = pool().await;
+    // The drain is stalled by closing its pool, so every commit attempt errors.
+    // This used to be simulated with an inode that does not exist, which stopped
+    // working at 0c36a07: a write to a deleted inode is now correctly discarded
+    // rather than retried forever, so the drain made progress and the gate
+    // emptied. The assertion is unchanged — only the way the stall is produced.
+    //
+    // This is the case a channel-based bound gets wrong: it would free a slot on
+    // each error and let writes be accepted forever while nothing commits. The
+    // gate holds the slot instead.
+    let live = pool().await;
+    let stalled = pool().await;
     let store = TempDir::new().unwrap();
 
     let pipeline = PendingPipeline::start(
-        pool.clone(),
+        stalled.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits {
             max_entries: 1,
@@ -272,10 +284,13 @@ async fn a_full_queue_refuses_with_pending_queue_full() {
     .await
     .expect("pipeline failed to start");
 
-    let orphan = Uuid::new_v4();
+    // From here the drain can do nothing at all.
+    stalled.close().await;
+
+    let inode = make_inode(&live).await;
     let mut refused = false;
     for i in 0..8 {
-        let m = marker(pipeline.next_seq(), orphan, &format!("body {i}"));
+        let m = marker(pipeline.next_seq(), inode, &format!("body {i}"));
         match pipeline.submit(&m).await {
             Ok(()) => {}
             Err(smartfs_schema::SmartFsError::PendingQueueFull) => {
@@ -286,6 +301,7 @@ async fn a_full_queue_refuses_with_pending_queue_full() {
         }
     }
 
+    cleanup(&live, inode).await;
     assert!(
         refused,
         "a queue of one behind a stalled drain must eventually refuse a write \
@@ -320,6 +336,7 @@ async fn a_restart_replays_markers_left_by_a_dead_daemon() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -354,12 +371,18 @@ async fn rescan_does_not_requeue_what_is_already_in_flight() {
     // Guards the failure mode that makes a periodic scan dangerous: with a
     // stalled drain, re-sending every marker on every pass turns a bounded disk
     // backlog into an unbounded memory one.
+    //
+    // Stall produced by closing the drain's pool — see the note in
+    // a_full_queue_refuses_with_pending_queue_full for why an orphan inode no
+    // longer stalls anything.
+    let live = pool().await;
     let pool = pool().await;
     let store = TempDir::new().unwrap();
 
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits {
             max_entries: 64,
@@ -369,10 +392,11 @@ async fn rescan_does_not_requeue_what_is_already_in_flight() {
     .await
     .expect("pipeline failed to start");
 
-    // An orphan inode means every commit fails, so markers stay queued.
-    let orphan = Uuid::new_v4();
+    pool.close().await;
+
+    let inode = make_inode(&live).await;
     for i in 0..4 {
-        let m = marker(pipeline.next_seq(), orphan, &format!("stuck {i}"));
+        let m = marker(pipeline.next_seq(), inode, &format!("stuck {i}"));
         let _ = pipeline.submit(&m).await;
     }
     // Let the drain fail each one and drop it from the in-flight set.
@@ -388,6 +412,8 @@ async fn rescan_does_not_requeue_what_is_already_in_flight() {
         "a marker already handed to the drain must not be requeued by the very \
          next scan"
     );
+
+    cleanup(&live, inode).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -406,6 +432,7 @@ async fn an_uncommitted_write_is_visible_to_readers() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits {
             max_entries: 8,
@@ -454,6 +481,7 @@ async fn the_overlay_steps_aside_once_the_row_is_real() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -500,6 +528,7 @@ async fn a_restart_rebuilds_the_overlay_before_serving() {
     let pipeline = PendingPipeline::start(
         pool.clone(),
         store.path(),
+        std::sync::Arc::new(LocalDiskStore::new(store.path())),
         &tokio::runtime::Handle::current(),
         PendingLimits::from_env(),
     )
@@ -518,4 +547,78 @@ async fn a_restart_rebuilds_the_overlay_before_serving() {
 
     await_versions(&pool, inode_id, 1).await;
     cleanup(&pool, inode_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a live Postgres; run with --ignored"]
+async fn deferred_dedup_collapses_a_duplicate_and_removes_its_copy() {
+    // ADR-62 phase C: the writer no longer knows whether identical content
+    // exists, so it always writes its own blob and the drain decides. The cost
+    // of that deferral is a wasted write on duplicates — this proves the waste
+    // is actually reclaimed rather than left lying around.
+    let pool = pool().await;
+    let dir = TempDir::new().unwrap();
+    let disk = std::sync::Arc::new(LocalDiskStore::new(dir.path()));
+    let inode_a = make_inode(&pool).await;
+    let inode_b = make_inode(&pool).await;
+
+    let pipeline = PendingPipeline::start(
+        pool.clone(),
+        dir.path(),
+        disk.clone(),
+        &tokio::runtime::Handle::current(),
+        PendingLimits::from_env(),
+    )
+    .await
+    .expect("pipeline failed to start");
+
+    // Unique per run. With a fixed string the first write would be deduped onto
+    // a blob left by an earlier run of this very test, and "the first write's
+    // blob becomes canonical" would fail for a reason that has nothing to do
+    // with the code — the shared-database coupling this suite criticises
+    // elsewhere.
+    let body = &format!("identical content written twice, run {}", Uuid::new_v4());
+
+    let mut first = marker(pipeline.next_seq(), inode_a, body);
+    first.blob_id = Some(Uuid::new_v4());
+    disk.put(first.blob_id.unwrap(), b"payload-a").await.unwrap();
+    pipeline.submit(&first).await.unwrap();
+    await_versions(&pool, inode_a, 1).await;
+
+    let mut second = marker(pipeline.next_seq(), inode_b, body);
+    second.blob_id = Some(Uuid::new_v4());
+    disk.put(second.blob_id.unwrap(), b"payload-b").await.unwrap();
+    pipeline.submit(&second).await.unwrap();
+    await_versions(&pool, inode_b, 1).await;
+
+    // Both versions must point at ONE blob — the first one written.
+    let blob_of = |inode| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT blob_id FROM file_versions WHERE inode_id = $1 AND blob_id IS NOT NULL",
+            )
+            .bind(inode)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(
+        blob_of(inode_a).await,
+        blob_of(inode_b).await,
+        "identical content must collapse onto one blob even though dedup is deferred"
+    );
+    assert_eq!(blob_of(inode_a).await, first.blob_id.unwrap());
+
+    // The second write's provisional copy must be gone.
+    for _ in 0..100 {
+        if !disk.exists(second.blob_id.unwrap()).await.unwrap() {
+            cleanup(&pool, inode_a).await;
+            cleanup(&pool, inode_b).await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the duplicate's provisional blob was never reclaimed");
 }
