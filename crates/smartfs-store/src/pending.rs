@@ -231,6 +231,7 @@ mod tests {
             blob_id: Some(Uuid::new_v4()),
             size: 11,
             compressed_size: Some(9),
+            shared: true,
             external_path: None,
             mode: 0o100644,
             uid: 1000,
